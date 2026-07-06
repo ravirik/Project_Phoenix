@@ -1,0 +1,32 @@
+{
+  "name": "Project Phoenix - Enterprise MLOps Workspace",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.testing.pytestEnabled": true,
+        "python.testing.pytestArgs": ["tests"],
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "charliermarsh.ruff"
+      },
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff",
+        "ms-azuretools.vscode-docker"
+      ]
+    }
+  },
+  "features": {
+    // Enables Docker-in-Docker (DinD) natively so you can run 'docker compose' seamlessly inside the workspace
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "version": "latest",
+      "moby": true
+    }
+  },
+  "postCreateCommand": "pip install --no-cache-dir -r /workspaces/Project_Phoenix/phoenix-core/requirements.txt",
+  "remoteUser": "vscode"
+}

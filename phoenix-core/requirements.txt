@@ -1,0 +1,16 @@
+# Stateful Graph Orchestration & Persistence
+langgraph>=0.1.0
+psycopg[binary,pool]>=3.2.0
+
+# Multi-Agent Schema Validation & Contracts
+pydantic>=2.7.0
+crewai>=0.28.0
+
+# In-Memory & Analytical Data Layers
+polars>=0.20.0
+redis>=5.0.0
+qdrant-client>=1.9.0
+
+# Telemetry & Observability (Correct PyPI Package Name)
+logfire>=0.3.0
+pytest>=8.0.0
