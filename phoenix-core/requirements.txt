@@ -14,3 +14,11 @@ qdrant-client>=1.9.0
 # Telemetry & Observability (Correct PyPI Package Name)
 logfire>=0.3.0
 pytest>=8.0.0
+nats-py>=2.7.0
+fastapi>=0.111.0
+uvicorn>=0.30.0
+langchain-openai>=0.1.0
+langchain-core>=0.1.0
+langchain-community>=0.2.0
+langchain-groq>=0.1.0
+langchain-google-genai>=1.0.0
