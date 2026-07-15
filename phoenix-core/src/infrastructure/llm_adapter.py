@@ -2,13 +2,11 @@ import os
 from dotenv import load_dotenv
 from langchain_core.language_models.chat_models import BaseChatModel
 
-load_dotenv()
+# FORCE dotenv to overwrite any stale cached variables in the terminal session
+load_dotenv(override=True)
 
 def get_llm() -> BaseChatModel:
-    """
-    Factory method to dynamically inject the chosen LLM provider.
-    Ensures zero vendor lock-in for the Agentic RAG pipeline.
-    """
+    """Factory method dynamically injecting the chosen LLM provider."""
     provider = os.getenv("LLM_PROVIDER", "openai").lower()
 
     if provider == "openai":
@@ -16,17 +14,20 @@ def get_llm() -> BaseChatModel:
         return ChatOpenAI(model="gpt-4o-mini", temperature=0.0)
         
     elif provider == "gemini":
+        api_key = os.getenv("GEMINI_API_KEY")
+        safe_key = api_key[:7] + "..." if api_key else "NOT_FOUND"
+        print(f"\n[Infrastructure] Booting Gemini API. Key signature: {safe_key}")
+        print("[Infrastructure] Utilizing model pointer: gemini-flash-latest")
+        
         from langchain_google_genai import ChatGoogleGenerativeAI
-        # Using gemini-1.5-flash for high-speed, cost-effective reasoning
         return ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash", 
+            model="gemini-flash-latest", 
             temperature=0.0,
-            api_key=os.getenv("GEMINI_API_KEY")
+            api_key=api_key
         )
 
     elif provider == "deepseek":
         from langchain_openai import ChatOpenAI
-        # DeepSeek uses the OpenAI SDK format with a custom base URL
         return ChatOpenAI(
             model="deepseek-chat", 
             temperature=0.0,
