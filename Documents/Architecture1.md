@@ -1,3 +1,4 @@
+```mermaid
 graph TD
     %% Styling definitions for visual hierarchy
     classDef infra fill:#2d3748,stroke:#4a5568,stroke-width:2px,color:#fff;
