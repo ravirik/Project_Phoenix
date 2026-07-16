@@ -17,7 +17,7 @@ graph TD
     Init <-->|Read/Write Checkpoints| PG[(PostgreSQL)]
 
     %% LangGraph Orchestration Subgraph
-    subgraph LangGraph State Machine
+    subgraph "LangGraph State Machine"
         Init --> Auditor[Auditor Agent Node]
         
         Auditor --> Router{State Router}
