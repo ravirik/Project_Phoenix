@@ -3,7 +3,9 @@ import json
 import re
 import traceback
 import pandas as pd
+import numpy as np
 import os
+import multiprocessing
 from typing import Dict, Any
 from langchain_core.prompts import PromptTemplate
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
@@ -74,45 +76,96 @@ async def run_janitor_agent(state: OrchestratorState) -> Dict[str, Any]:
     }
 
 
+def _isolated_sandbox(code_string: str, data_path: str, queue: multiprocessing.Queue):
+    """
+    Runs in a completely separate OS process. 
+    If this crashes or hangs, the main worker survives.
+    """
+    try:
+        # 1. Load the corrupted data
+        df = pd.read_parquet(data_path)
+
+        # 2. Namespace Restriction (The Jail)
+        # We explicitly block all standard python built-ins so the LLM cannot import
+        # libraries, open system files, or execute shell commands.
+        safe_globals = {"__builtins__": {}}
+
+        # We only pass in the exact variables it needs to heal the data.
+        safe_locals = {
+            "df": df,
+            "pd": pd,
+            "np": np
+        }
+
+        # 3. Execute the patched code inside the jail
+        exec(code_string, safe_globals, safe_locals)
+
+        # 4. Verify and Save
+        healed_df = safe_locals.get("df")
+        if healed_df is not None and healed_df.isnull().sum().sum() == 0:
+            healed_df.to_parquet(data_path, index=False)
+            queue.put({"status": "SUCCESS"})
+        else:
+            queue.put({"status": "PARTIAL_SUCCESS",
+                      "reason": "Nulls remain after execution."})
+
+    except Exception as e:
+        queue.put({"status": "EXECUTION_FAILED", "error": str(e)})
+
+
 async def run_executor_node(state: OrchestratorState) -> Dict[str, Any]:
-    print("[Agent: Executor] Starting remediation...")
+    print("[Agent: Executor] Initializing Secure Sandbox...")
     path = state.get("data_path")
     if not path or not os.path.exists(path):
         return {"status": "EXECUTION_FAILED"}
 
-    df = pd.read_parquet(path)
     patch = state.get("final_patch", "")
 
-    # 1. CLEANUP: Convert literal "\\n" to actual "\n" and strip whitespace
+    # 1. Clean the LLM output
     patch = patch.replace('\\n', '\n').strip()
-
-    # 2. EXTRACT: Get code block
     code_match = re.search(r"```python(.*?)```", patch, re.DOTALL)
     code_to_run = code_match.group(1).strip() if code_match else patch.strip()
 
-    # 3. CIRCUIT BREAKER: If LLM tries to load data, we override it with the safe, intended fix.
-    # We strictly forbid 'read_parquet' or 'pd.read' in the generated code.
+    # 2. Circuit Breaker: Strip file reading operations
     if "read_parquet" in code_to_run or "pd.read" in code_to_run:
         print(
-            "[Agent: Executor] ⚠️ LLM hallucinated a file read. Overriding with safe logic.")
+            "[Agent: Executor] ⚠️ Circuit Breaker: Stripped hallucinated I/O operations.")
         code_to_run = "df = df.replace(r'^\\s*$', np.nan, regex=True).dropna()"
 
-    # 4. EXECUTE
-    local_vars = {"df": df, "pd": pd, "np": __import__("numpy")}
-    try:
-        # We perform one last cleanup of the string to remove any leading/trailing weirdness
-        code_to_run = code_to_run.replace('\\n', '').strip()
-        print(f"[Agent: Executor] Executing clean patch:\n{code_to_run}")
+    # 3. Sandbox Pre-Processing: Strip all import statements.
+    # The sandbox has no __builtins__, so 'import' will crash it. We already inject pd and np.
+    code_to_run = re.sub(r'^\s*(import|from)\s+.*$', '',
+                         code_to_run, flags=re.MULTILINE).strip()
 
-        exec(code_to_run, {}, local_vars)
+    print(f"[Agent: Executor] Injecting into sandbox:\n{code_to_run}")
 
-        healed_df = local_vars["df"]
-        if healed_df is not None and healed_df.isnull().sum().sum() == 0:
-            print("[Agent: Executor] ✅ Remediation success.")
-            healed_df.to_parquet(path, index=False)
-            return {"status": "SUCCESS"}
+    # 4. Spawn the Isolated Process
+    queue = multiprocessing.Queue()
+    process = multiprocessing.Process(
+        target=_isolated_sandbox,
+        args=(code_to_run, path, queue)
+    )
 
-        return {"status": "PARTIAL_SUCCESS"}
-    except Exception:
-        print(f"[Agent: Executor] ❌ Execution Error: {traceback.format_exc()}")
-        return {"status": "EXECUTION_FAILED"}
+    process.start()
+
+    # 5. Enforce strict execution timeout (10 seconds)
+    process.join(timeout=10.0)
+
+    if process.is_alive():
+        print(
+            "[Agent: Executor] ❌ Sandbox Timeout: LLM code exceeded execution limits. Terminating.")
+        process.terminate()
+        process.join()
+        return {"status": "EXECUTION_TIMEOUT"}
+
+    # 6. Retrieve result
+    if not queue.empty():
+        result = queue.get()
+        if result["status"] == "SUCCESS":
+            print("[Agent: Executor] ✅ Remediation success within sandbox.")
+        else:
+            print(
+                f"[Agent: Executor] ❌ Sandbox Error: {result.get('error', result.get('reason'))}")
+        return result
+
+    return {"status": "EXECUTION_FAILED"}
