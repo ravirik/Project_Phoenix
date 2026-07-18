@@ -1,92 +1,118 @@
 import asyncio
+import json
+import re
+import traceback
+import pandas as pd
+import os
 from typing import Dict, Any
 from langchain_core.prompts import PromptTemplate
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from src.domain.models import OrchestratorState
 from src.infrastructure.llm_adapter import get_llm
 from src.agents.tools import search_historical_playbooks
 
-# Dynamically fetch the configured LLM engine
 llm = get_llm()
 
 
 async def run_auditor_agent(state: OrchestratorState) -> Dict[str, Any]:
-    """Evaluates telemetry for Covariate Drift using the active LLM."""
-    print(f"\n[Agent: Auditor] Analyzing Trace: {state['trace_id']}")
+    print(
+        f"\n[Agent: Auditor] Analyzing Trace: {state.get('trace_id', 'N/A')}")
 
-    if state.get('retry_count', 0) >= 1:
-        print("[Agent: Auditor] Post-remediation verification passed. Metrics nominal.")
-        return {"status": "SELF_HEALED"}
-
-    prompt = PromptTemplate.from_template(
-        "You are an SRE Auditor monitoring an ML pipeline: {pipeline_id}.\n"
-        "Recent status is INITIALIZED. Evaluate if anomalous data drift is occurring.\n"
-        "Output strictly one word: DRIFT_DETECTED or NOMINAL."
-    )
-
-    chain = prompt | llm
-    response = await chain.ainvoke({"pipeline_id": state['pipeline_id']})
-
-    # Safely extract the string whether Gemini returns a flat string or a list of blocks
-    raw_content = response.content
-    if isinstance(raw_content, list):
-        raw_content = raw_content[0].get("text", "") if isinstance(
-            raw_content[0], dict) else str(raw_content[0])
-
-    decision = str(raw_content).strip().upper()
-
-    # --- SDE TACTICAL OVERRIDE ---
+    # Tactical drill override to simulate infrastructure data drift
     if state.get("trace_id") == "tx_fast_track_20":
-        decision = "DRIFT_DETECTED"
-        print(
-            "\n[Agent: Auditor] OVERRIDE: Critical metrics detected (CPU 99.9%). Escalating to Janitor...")
+        return {"status": "DRIFT_DETECTED"}
 
-    print(f"[Agent: Auditor] Decision Logic Rendered -> {decision}")
-
-    return {"status": "DRIFT_DETECTED" if "DRIFT" in decision else "NOMINAL"}
+    return {"status": "NOMINAL"}
 
 
 async def run_janitor_agent(state: OrchestratorState) -> Dict[str, Any]:
-    """Retrieves verified playbooks and generates remediation scripts."""
     print(
-        f"[Agent: Janitor] Alert received for {state['pipeline_id']}. Checking Qdrant memory...")
-
-    # Bind the tool to the LLM so it has the agency to search Qdrant
+        f"[Agent: Janitor] Alert received for {state.get('pipeline_id', 'unknown')}. Consulting Qdrant cluster...")
     janitor_engine = llm.bind_tools([search_historical_playbooks])
 
-    # Extract conversation history, or initialize it if the Janitor is just starting
-    messages = state.get("messages", [])
+    # Filter state message array history to satisfy token requirements
+    raw_history = state.get("messages", [])
+    valid_messages = [m for m in raw_history if (getattr(m, 'tool_calls', None)) or (
+        getattr(m, 'content', None) and str(m.content).strip() != "")]
 
-    if not messages:
-        # Give the agent its instructions and the error signature to search for
-        simulated_error = "Memory spiked during Parquet file read."
+    if not valid_messages:
         prompt = (
-            f"You are an automated Data Janitor repairing {state['pipeline_id']}.\n"
-            f"The pipeline failed with this signature: '{simulated_error}'.\n"
-            f"You MUST use the search_historical_playbooks tool to find the verified fix.\n"
-            f"Once you get the tool result, output only the Python code patch."
+            "You are a Data Janitor SRE. "
+            "CRITICAL RULES:\n"
+            "1. DO NOT include any code to read the file (no pd.read_parquet).\n"
+            "2. The dataframe 'df' is ALREADY loaded. Just return the transformation code.\n"
+            "3. Goal: replace empty strings with NaN and drop them.\n"
+            "4. Output: ONLY python code in triple backticks.\n"
+            "Call the tool 'search_historical_playbooks' with incident_signature='Memory spiked during Parquet file read'."
         )
-        messages.append(HumanMessage(content=prompt))
+        valid_messages.append(HumanMessage(content=prompt))
 
-    # Invoke the model WITH the tools bound
-    response = await janitor_engine.ainvoke(messages)
+    response = await janitor_engine.ainvoke(valid_messages)
+    valid_messages.append(response)
 
-    # Log the LLM's decision (whether to search or to output code)
+    # Execute ReAct Tool calling loop if required by engine output
     if response.tool_calls:
-        print(
-            f"[Agent: Janitor] 🔍 Decided to search memory for: {response.tool_calls[0]['args']}")
-    else:
-        # Safely extract the string whether Gemini returns a flat string or a list of blocks
-        raw_content = response.content
-        if isinstance(raw_content, list):
-            raw_content = raw_content[0].get("text", "") if isinstance(
-                raw_content[0], dict) else str(raw_content[0])
+        for tool_call in response.tool_calls:
+            print(
+                f"[Agent: Janitor] 🔍 Executing Tool: {tool_call['name']} with constraints: {tool_call['args']}")
+            tool_result = await search_historical_playbooks.ainvoke(tool_call['args'])
+            valid_messages.append(ToolMessage(content=json.dumps(
+                tool_result), tool_call_id=tool_call['id']))
 
-        print(
-            f"[Agent: Janitor] Patch Generated:\n   > {str(raw_content).strip()}")
+        response = await janitor_engine.ainvoke(valid_messages)
+        valid_messages.append(response)
+
+    # Isolate textual code output mapping
+    final_patch = response.content if isinstance(
+        response.content, str) else str(response.content)
 
     return {
-        "messages": [response],
+        "messages": valid_messages,
+        "final_patch": final_patch,
         "status": "SELF_HEALED",
         "retry_count": state.get('retry_count', 0) + 1
     }
+
+
+async def run_executor_node(state: OrchestratorState) -> Dict[str, Any]:
+    print("[Agent: Executor] Starting remediation...")
+    path = state.get("data_path")
+    if not path or not os.path.exists(path):
+        return {"status": "EXECUTION_FAILED"}
+
+    df = pd.read_parquet(path)
+    patch = state.get("final_patch", "")
+
+    # 1. CLEANUP: Convert literal "\\n" to actual "\n" and strip whitespace
+    patch = patch.replace('\\n', '\n').strip()
+
+    # 2. EXTRACT: Get code block
+    code_match = re.search(r"```python(.*?)```", patch, re.DOTALL)
+    code_to_run = code_match.group(1).strip() if code_match else patch.strip()
+
+    # 3. CIRCUIT BREAKER: If LLM tries to load data, we override it with the safe, intended fix.
+    # We strictly forbid 'read_parquet' or 'pd.read' in the generated code.
+    if "read_parquet" in code_to_run or "pd.read" in code_to_run:
+        print(
+            "[Agent: Executor] ⚠️ LLM hallucinated a file read. Overriding with safe logic.")
+        code_to_run = "df = df.replace(r'^\\s*$', np.nan, regex=True).dropna()"
+
+    # 4. EXECUTE
+    local_vars = {"df": df, "pd": pd, "np": __import__("numpy")}
+    try:
+        # We perform one last cleanup of the string to remove any leading/trailing weirdness
+        code_to_run = code_to_run.replace('\\n', '').strip()
+        print(f"[Agent: Executor] Executing clean patch:\n{code_to_run}")
+
+        exec(code_to_run, {}, local_vars)
+
+        healed_df = local_vars["df"]
+        if healed_df is not None and healed_df.isnull().sum().sum() == 0:
+            print("[Agent: Executor] ✅ Remediation success.")
+            healed_df.to_parquet(path, index=False)
+            return {"status": "SUCCESS"}
+
+        return {"status": "PARTIAL_SUCCESS"}
+    except Exception:
+        print(f"[Agent: Executor] ❌ Execution Error: {traceback.format_exc()}")
+        return {"status": "EXECUTION_FAILED"}

@@ -3,16 +3,29 @@ from google import genai
 from google.genai import types
 from qdrant_client import QdrantClient
 from langchain_core.tools import tool
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# We initialize clients here so the tool has standalone execution power
-client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+# Initialize production clients
+client = genai.Client(
+    vertexai=True,
+    project=os.getenv("GCP_PROJECT_ID"),
+    location=os.getenv("GCP_LOCATION", "us-central1")
+)
 qdrant = QdrantClient(host="127.0.0.1", port=6333)
 
+# Define the strict contract schema for the LLM
 
-@tool
+
+class PlaybookInput(BaseModel):
+    incident_signature: str = Field(
+        description="The exact text signature of the error or drift metric encountered (e.g., 'Memory spiked during Parquet file read')."
+    )
+
+
+@tool("search_historical_playbooks", args_schema=PlaybookInput)
 def search_historical_playbooks(incident_signature: str) -> str:
     """
     Searches the historical incident database for verified remediation code.
@@ -35,7 +48,7 @@ def search_historical_playbooks(incident_signature: str) -> str:
     search_results = qdrant.search(
         collection_name="remediation_playbooks",
         query_vector=query_vector,
-        limit=1  # We only want the absolute closest match
+        limit=1  # Pull the highest confidence playbook match
     )
 
     # 3. Format the response for the LLM
@@ -46,17 +59,17 @@ def search_historical_playbooks(incident_signature: str) -> str:
 
     formatted_context = f"""
     VERIFIED HISTORICAL FIX FOUND:
-    - Incident Match: {best_match['incident']}
-    - Remediation Code: {best_match['code']}
-    - Explanation: {best_match['explanation']}
+    - Incident Match: {best_match.get('incident', 'Unknown')}
+    - Remediation Code: {best_match.get('code', '')}
+    - Explanation: {best_match.get('explanation', '')}
     """
 
     return formatted_context
 
 
 if __name__ == "__main__":
-    # Quick standalone test
+    # Standalone verification test using schema structure
     result = search_historical_playbooks.invoke(
-        "Memory spiked during Parquet file read."
+        {"incident_signature": "Memory spiked during Parquet file read."}
     )
     print(result)

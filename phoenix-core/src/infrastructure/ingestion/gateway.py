@@ -1,34 +1,52 @@
 import json
-import os
-from fastapi import FastAPI, HTTPException, status
 import nats
+from fastapi import FastAPI, Request, HTTPException
+from contextlib import asynccontextmanager
 from src.domain.models import TelemetryLogPacket
 
-app = FastAPI(title="Project Phoenix Ingestion Gateway", version="1.0.0")
-NATS_URL = os.getenv("NATS_URL", "nats://localhost:4222")
+# Global state to hold the NATS connection
 
-@app.post("/api/v1/telemetry", status_code=status.HTTP_202_ACCEPTED)
-async def ingest_telemetry(packet: TelemetryLogPacket):
+
+class AppState:
+    js = None
+    nc = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Connect to NATS on startup
+    nc = await nats.connect("nats://localhost:4222")
+    js = nc.jetstream()
+
+    app.state.js = js
+    app.state.nc = nc
+    yield
+    # Close connection on shutdown
+    await nc.close()
+
+app = FastAPI(title="Phoenix Ingestion Gateway", lifespan=lifespan)
+
+
+@app.post("/api/v1/telemetry")
+async def ingest_telemetry(packet: TelemetryLogPacket, request: Request):
     """
-    Ingress point catching high-velocity streaming log matrices.
-    Validates schemas instantly via Pydantic and forwards them into the NATS bus.
+    Acts as an event producer. Validates payload and pushes to NATS.
     """
     try:
-        nc = await nats.connect(NATS_URL)
-        js = nc.jetstream()
-        
-        # Serialize the verified domain model package
-        payload_bytes = json.dumps(packet.model_dump(), default=str).encode("utf-8")
-        
-        # Publish into the dedicated telemetry subject channel
-        subject = f"telemetry.raw.{packet.pipeline_id}"
-        ack = await js.publish(subject, payload_bytes)
-        
-        await nc.close()
-        return {"status": "QUEUED", "stream": ack.stream, "sequence": ack.seq}
-        
+        # 1. Prepare data
+        payload = packet.model_dump()
+        payload_bytes = json.dumps(payload).encode("utf-8")
+
+        # 2. Publish to NATS stream
+        # This matches the 'telemetry.raw.*' subscription in your consumer
+        await request.app.state.js.publish("telemetry.raw.ingestion", payload_bytes)
+
+        return {"status": "queued", "trace_id": packet.trace_id}
+
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Ingestion Engine Transport Fault: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Broker Error: {str(e)}")
+
+
+@app.get("/health")
+async def health_check():
+    return {"status": "online"}
