@@ -221,3 +221,6 @@ __marimo__/
 .env
 .env.*
 *.env
+y/
+google-cloud-sdk/
+data/*.parquet
