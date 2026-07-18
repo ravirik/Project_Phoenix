@@ -11,7 +11,7 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from src.domain.models import OrchestratorState
 from src.infrastructure.llm_adapter import get_llm
-from src.agents.tools import search_historical_playbooks
+from src.agents.tools import search_historical_playbooks, upsert_playbook
 
 llm = get_llm()
 
@@ -169,3 +169,27 @@ async def run_executor_node(state: OrchestratorState) -> Dict[str, Any]:
         return result
 
     return {"status": "EXECUTION_FAILED"}
+
+
+async def run_memory_updater_node(state: OrchestratorState) -> Dict[str, Any]:
+    """
+    This node only executes if the Sandbox reports SUCCESS. 
+    It commits the new patch to long-term memory.
+    """
+    print("[Agent: Memory] Continuous Learning triggered. Committing verified patch to Qdrant...")
+
+    # Retrieve the context
+    patch = state.get("final_patch", "")
+    trace_id = state.get("trace_id", "unknown_trace")
+
+    # In a full production system, you'd extract the actual incident string from the Auditor's alert.
+    # For now, we will use the trace ID as the unique incident signature.
+    incident_signature = f"Anomaly detected in trace {trace_id}"
+
+    try:
+        # Call the deterministic update function
+        upsert_playbook(incident_signature, patch)
+        return {"status": "MEMORY_UPDATED"}
+    except Exception as e:
+        print(f"[Agent: Memory] ❌ Failed to commit to Qdrant: {str(e)}")
+        return {"status": "MEMORY_UPDATE_FAILED"}

@@ -1,4 +1,5 @@
 import os
+import uuid
 from google import genai
 from google.genai import types
 from qdrant_client import QdrantClient
@@ -65,6 +66,47 @@ def search_historical_playbooks(incident_signature: str) -> str:
     """
 
     return formatted_context
+
+
+def upsert_playbook(incident_signature: str, patch_code: str):
+    """
+    Deterministically saves a successful telemetry-to-patch mapping back into Qdrant.
+    This acts as the system's continuous learning mechanism.
+    """
+    print(f"\n[Memory Pipeline] Generating embedding for verified patch...")
+
+    # 1. Embed the signature
+    response = client.models.embed_content(
+        model="gemini-embedding-001",
+        contents=incident_signature,
+        config=types.EmbedContentConfig(
+            task_type="RETRIEVAL_DOCUMENT"  # Document type for storage
+        )
+    )
+    vector = response.embeddings[0].values
+
+    # 2. Package the payload
+    point_id = str(uuid.uuid4())
+    payload = {
+        "incident": incident_signature,
+        "code": patch_code,
+        "explanation": "Auto-generated and verified by Phoenix Executor Sandbox",
+        "auto_healed": True
+    }
+
+    # 3. Upsert into Qdrant
+    qdrant.upsert(
+        collection_name="remediation_playbooks",
+        points=[
+            {
+                "id": point_id,
+                "vector": vector,
+                "payload": payload
+            }
+        ]
+    )
+    print(
+        f"[Memory Pipeline] ✅ Successfully committed new playbook {point_id[:8]} to Qdrant.")
 
 
 if __name__ == "__main__":
