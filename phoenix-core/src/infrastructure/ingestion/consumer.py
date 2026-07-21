@@ -1,77 +1,77 @@
 import asyncio
 import json
 import os
+import logging
+import logfire
 import nats
 from nats.errors import TimeoutError
-from src.app import trigger_agentic_pipeline
+from src.app import trigger_agentic_pipeline, initialize_app_runtime
 
-# Configuration
-NATS_URL = os.getenv("NATS_URL", "nats://localhost:4222")
+logfire.configure(send_to_logfire="if-token-present")
+logfire.instrument_system_metrics()
+logging.basicConfig(handlers=[logfire.LogfireLoggingHandler()])
+logger = logging.getLogger(__name__)
+
+NATS_URL = os.getenv("NATS_URL", "nats://phoenix-nats-bus:4222")
 STREAM_NAME = "PHOENIX_STREAM"
 SUBJECT = "telemetry.raw.*"
 DURABLE_NAME = "janitor_processor_pool"
 
+
 async def run_consumer():
-    """Main consumer loop with robust error handling and ACK management."""
-    print("[Worker] Initializing AI Pull-Consumer framework...")
-    
-    # 1. Connect to NATS
+    """Main consumer loop with pre-warmed runtime engine."""
+    print("[Worker] Initializing AI Pull-Consumer framework...", flush=True)
+
+    # Pre-warm connection pools and compile graph ONCE
+    await initialize_app_runtime()
+
     nc = await nats.connect(NATS_URL)
     js = nc.jetstream()
 
-    # 2. Setup Stream (Idempotent)
-    await js.add_stream(name=STREAM_NAME, subjects=[SUBJECT])
-    
-    # 3. Pull Subscription
+    try:
+        await js.add_stream(name=STREAM_NAME, subjects=[SUBJECT])
+    except Exception:
+        pass
+
     sub = await js.pull_subscribe(
         subject=SUBJECT,
         durable=DURABLE_NAME,
         stream=STREAM_NAME
     )
 
-    print(f"[Worker] Agentic Pipeline active. Listening for telemetry on {SUBJECT}...")
-    
-    try:
-        while True:
-            try:
-                # Fetch message with timeout
-                messages = await sub.fetch(batch=1, timeout=5)
-                
-                for msg in messages:
-                    raw_data = None
-                    try:
-                        raw_data = json.loads(msg.data.decode("utf-8"))
-                        trace_id = raw_data.get('trace_id', 'unknown')
-                        
-                        print(f"\n--- INCOMING TELEMETRY DETECTED ---")
-                        print(f"Subject: {msg.subject} | Trace ID: {trace_id}")
-                        
-                        # 🚀 TRIGGER THE LANGGRAPH AI AGENTS
-                        await trigger_agentic_pipeline(raw_data)
-                        
-                        print(f"[Worker] SUCCESS: Transaction {trace_id} finalized.")
-                        
-                    except json.JSONDecodeError:
-                        print("[Worker] ERROR: Malformed JSON. Discarding message.")
-                    except Exception as e:
-                        # Catching AI/Agent errors so they don't crash the consumer
-                        print(f"[Worker] ERROR: Pipeline execution failed: {e}")
-                    finally:
-                        # THE GHOST-BUSTER:
-                        # ALWAYS ACK, even if the pipeline failed.
-                        # This removes the message from the NATS queue, 
-                        # preventing it from being re-delivered infinitely.
-                        await msg.ack()
-                        print(f"[Worker] Message acknowledged (Queue purged).")
-                        
-            except TimeoutError:
-                # Keep loop alive during idle periods
-                await asyncio.sleep(0.1)
-                
-    except KeyboardInterrupt:
-        print("\n[Worker] Stopping ingestion consumer thread gracefully...")
-    finally:
-        await nc.close()
+    print(
+        f"[Worker] Agentic Pipeline active. Listening on {SUBJECT}...\n", flush=True)
+
+    while True:
+        try:
+            messages = await sub.fetch(batch=1, timeout=5)
+            for msg in messages:
+                try:
+                    raw_data = json.loads(msg.data.decode("utf-8"))
+                    trace_id = raw_data.get('trace_id', 'unknown')
+                    print(
+                        f"\n--- INCOMING TELEMETRY DETECTED --- | Trace ID: {trace_id}", flush=True)
+
+                    await trigger_agentic_pipeline(raw_data)
+                    print(
+                        f"[Worker] SUCCESS: Transaction {trace_id} finalized.", flush=True)
+
+                except Exception as e:
+                    print(
+                        f"[Worker] ERROR: Pipeline execution failed: {e}", flush=True)
+
+                finally:
+                    await msg.ack()
+                    print(
+                        "[Worker] Message acknowledged (Queue purged).", flush=True)
+
+        except TimeoutError:
+            await asyncio.sleep(0.1)
+        except KeyboardInterrupt:
+            break
+
+    await nc.close()
+
 
 if __name__ == "__main__":
     asyncio.run(run_consumer())

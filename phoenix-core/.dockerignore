@@ -1,0 +1,14 @@
+# Ignore local environment and cache
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.git
+.vscode
+
+# Ignore datasets and large binary caches that don't belong in the image
+data/
+models/
+.ipynb_checkpoints
+.DS_Store

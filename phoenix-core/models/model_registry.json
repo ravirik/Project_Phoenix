@@ -1,0 +1,24 @@
+{
+  "active_champion": {
+    "version": "v1.0.0",
+    "model_path": "models/core_prediction_model.joblib",
+    "metrics": {
+      "f1_score": 0.81,
+      "roc_auc": 0.84,
+      "latency_ms": 12.5
+    },
+    "status": "PRODUCTION"
+  },
+  "history": [
+    {
+      "version": "candidate_1784642727",
+      "metrics": {
+        "f1_score": 0.4747474747474747,
+        "roc_auc": 0.5208333333333334,
+        "latency_ms": 18.532421100007923
+      },
+      "status": "CHALLENGER",
+      "timestamp": "2026-07-21T14:05:27Z"
+    }
+  ]
+}
