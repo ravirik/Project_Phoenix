@@ -71,31 +71,46 @@ def create_mle_crew(mle_error_feedback: str = None, previous_code: str = None) -
 
     mle_agent = Agent(
         role="MLOps Release Engineer",
-        goal="Evaluate candidate model metrics, benchmark against production Champion, and export ONNX.",
-        backstory="You are a principal MLOps Release Engineer. You write standalone Python scripts to evaluate candidate models and export ONNX graphs.",
+        goal="Train, evaluate, and export machine learning models dynamically across Classification, Regression, and Clustering tasks.",
+        backstory=(
+            "You are a principal MLOps Release Engineer. You write self-contained Python scripts "
+            "to fit Scikit-Learn models tailored to the auto-detected task type, evaluate performance, "
+            "export models to ONNX format, and update local model registries."
+        ),
         llm=llm, max_iter=3, verbose=True
     )
 
     serialize_description = (
-        "Write a standalone Python script to execute end-to-end Feature Engineering, Model Training, Validation, and ONNX Export.\n"
-        "Requirements:\n"
-        "1. FEATURE ENGINEERING & SPLIT:\n"
-        "   - Load parquet dataset from '{data_path}'.\n"
-        "   - Separate features (X) and target label 'target' (y).\n"
-        "   - Apply StandardScaler/MinMaxScaler or handle categorical encodings on X.\n"
-        "   - Perform an 80/20 Train/Validation split using train_test_split(test_size=0.2, random_state=42).\n\n"
-        "2. MODEL TRAINING (EPOCHS / FITTING):\n"
-        "   - Train a Scikit-Learn (e.g., RandomForest/LogisticRegression) or PyTorch Neural Network.\n"
-        "   - If PyTorch: Train for 10 epochs using Adam optimizer and BCE/CrossEntropy loss.\n\n"
-        "3. MODEL VALIDATION & BENCHMARKING:\n"
-        "   - Evaluate the candidate model on the 20% Validation Set.\n"
-        "   - Compute Validation F1-Score, ROC-AUC, and average inference latency (ms over 100 iterations).\n"
-        "   - Compare Validation F1 against Champion F1 in 'models/model_registry.json' (default Champ F1 = 0.80).\n"
-        "   - Set promotion_status to 'PRODUCTION' if candidate F1 > Champion F1, else 'CHALLENGER'.\n\n"
-        "4. EXPORT & REGISTRY:\n"
-        "   - Export the trained pipeline/model to ONNX format at 'models/pipeline_model.onnx'.\n"
-        "   - Update 'models/model_registry.json' with candidate metrics and status.\n"
-        "5. Output ONLY the Python script strictly enclosed inside ```python ... ``` triple backticks."
+        "Write a standalone Python script to execute end-to-end Model Training, Evaluation, ONNX Export, and Registry Tracking.\n\n"
+        "CONFIG:\n"
+        "- Dataset Path: '{data_path}'\n"
+        "- Task Type: '{task_type}'\n"
+        "- Target Column: '{target_col}'\n\n"
+        "REQUIREMENTS:\n"
+        "1. DATA LOADING & PREPROCESSING:\n"
+        "   - Load Parquet dataset from '{data_path}'.\n"
+        "   - IF task_type is 'CLUSTERING': Use all numeric/encoded features as feature matrix X (no target y).\n"
+        "   - ELSE: Separate feature matrix X and target y = df['{target_col}']. Perform an 80/20 Train/Val split (test_size=0.2, random_state=42).\n"
+        "   - Use ColumnTransformer with StandardScaler for numerical features and OneHotEncoder(handle_unknown='ignore') for string categoricals.\n\n"
+        "2. MODEL TRAINING & METRICS BY TASK TYPE:\n"
+        "   - IF task_type == 'REGRESSION':\n"
+        "     Fit sklearn.ensemble.RandomForestRegressor(n_estimators=100, random_state=42).\n"
+        "     Compute candidate_rmse = root_mean_squared_error(y_val, y_pred) and candidate_r2 = r2_score(y_val, y_pred).\n"
+        "     Set promotion_status = 'PRODUCTION' if candidate_rmse < 10.0 else 'CHALLENGER'.\n\n"
+        "   - IF task_type == 'CLUSTERING':\n"
+        "     Fit sklearn.cluster.KMeans(n_clusters=3, random_state=42) on X.\n"
+        "     Compute candidate_silhouette = silhouette_score(X, model.labels_).\n"
+        "     Set promotion_status = 'PRODUCTION' if candidate_silhouette > 0.35 else 'CHALLENGER'.\n\n"
+        "   - IF task_type in ['BINARY_CLASSIFICATION', 'MULTICLASS_CLASSIFICATION']:\n"
+        "     Fit sklearn.ensemble.RandomForestClassifier(n_estimators=100, random_state=42).\n"
+        "     Compute candidate_f1 = f1_score(y_val, y_pred, average='weighted').\n"
+        "     Set promotion_status = 'PRODUCTION' if candidate_f1 > 0.80 else 'CHALLENGER'.\n\n"
+        "3. EXPORT & REGISTRY:\n"
+        "   - Save the fitted pipeline/model to ONNX format at 'models/pipeline_model.onnx' using skl2onnx.\n"
+        "   - Update 'models/model_registry.json' with metrics and promotion_status.\n"
+        "   - Explicitly assign metric variables (candidate_f1, candidate_rmse, candidate_silhouette, promotion_status) in top-level script scope.\n\n"
+        "4. OUTPUT FORMAT:\n"
+        "   - Output ONLY the Python script strictly enclosed inside ```python ... ``` triple backticks."
     )
 
     # 🛡️ DYNAMIC REVALIDATION GUARDRAIL
@@ -115,15 +130,13 @@ def create_mle_crew(mle_error_feedback: str = None, previous_code: str = None) -
 
     return Crew(agents=[mle_agent], tasks=[task_serialize], process=Process.sequential, step_callback=agent_step_callback, verbose=True)
 
+
 # Define a custom retry condition for Rate Limits
-
-
 def is_rate_limit(exception):
     return "429" in str(exception) or "Resource exhausted" in str(exception)
 
 
 @retry(
-    # Waits 30s, then 60s, then 120s
     wait=wait_exponential(multiplier=15, min=30, max=120),
     stop=stop_after_attempt(5),
     retry=retry_if_exception_type(Exception),

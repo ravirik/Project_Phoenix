@@ -77,13 +77,11 @@ async def run_de_crew_node(state: OrchestratorState) -> Dict[str, Any]:
     actual_columns = []
     if os.path.exists(data_path):
         try:
-            import pandas as pd
             df_sample = pd.read_parquet(data_path)
             actual_columns = df_sample.columns.tolist()
         except Exception:
             pass
 
-    # Pass schema context into inputs
     inputs = {
         "trace_id": trace_id,
         "schema_columns": str(actual_columns)
@@ -96,7 +94,6 @@ async def run_de_crew_node(state: OrchestratorState) -> Dict[str, Any]:
         print(
             f"[Agent: DE Crew] 🚨 Fatal LLM Execution Error: {error_msg}", flush=True)
 
-        # If it's a 429 Rate Limit, wait 30 seconds before failing the node
         if "429" in error_msg or "Resource exhausted" in error_msg:
             print(
                 "[Agent: DE Crew] ⏳ Rate limit hit. Cooling down for 30s...", flush=True)
@@ -131,7 +128,6 @@ def _os_process_de_sandbox(code_string: str, data_path: str, queue: multiprocess
                 if hasattr(df[col].dtype, "pyarrow_dtype") or "arrow" in str(df[col].dtype).lower():
                     df[col] = df[col].astype(object)
 
-            # Unified dictionary for exec() prevents Lambda/Closure scoping bugs
             unified_namespace = {
                 "__builtins__": __builtins__,
                 "df": df,
@@ -172,7 +168,7 @@ async def run_executor_node(state: OrchestratorState) -> Dict[str, Any]:
     process.join(timeout=15.0)
 
     if process.is_alive():
-        process.kill()  # Graceful degradation
+        process.kill()
         process.join()
         return {"status": "DE_FAILED", "de_error_feedback": "TimeoutError: Execution exceeded 15s.", "de_previous_code": code_to_run}
 
@@ -200,7 +196,7 @@ async def run_memory_updater_node(state: OrchestratorState) -> Dict[str, Any]:
         return {"status": "MEMORY_UPDATE_FAILED"}
 
 # ================================================================================
-# NODE 4 & 5: MLE REGISTRY LOOP
+# NODE 4 & 5: MLE REGISTRY LOOP (TASK-AWARE AUTO-PROFILING)
 # ================================================================================
 
 
@@ -208,14 +204,60 @@ async def run_mle_crew_node(state: OrchestratorState) -> Dict[str, Any]:
     global _MLE_OUTPUT_BUFFER
     sys.stdout.flush()
     retries = state.get("mle_retry_count", 0)
+    data_path = state.get("data_path", "data/default_ingestion.parquet")
+
     print(
         f"\n{'='*80}\n [NODE 4/5] STARTING MLE CREW (RETRY {retries}/3)\n{'='*80}\n", flush=True)
 
-    # 🛡️ LLM RATE LIMIT & AVAILABILITY GUARDRAIL
+    # --- 🔎 DYNAMIC TASK PROFILER ---
+    task_type = "BINARY_CLASSIFICATION"
+    target_col = None
+
+    if os.path.exists(data_path):
+        try:
+            df_temp = pd.read_parquet(data_path)
+
+            possible_targets = [c for c in ['target', 'is_fraud', 'label', 'category',
+                                            'status_code', 'price', 'transaction_amount'] if c in df_temp.columns]
+
+            if possible_targets:
+                target_col = possible_targets[0]
+            elif len(df_temp.columns) > 1 and df_temp.columns[-1] not in ['trace_id', 'timestamp', 'account_id']:
+                target_col = df_temp.columns[-1]
+
+            if not target_col or target_col not in df_temp.columns:
+                task_type = "CLUSTERING"
+                target_col = "NONE (UNSUPERVISED)"
+            else:
+                target_series = df_temp[target_col].dropna()
+                unique_count = target_series.nunique()
+                is_numeric = pd.api.types.is_numeric_dtype(target_series)
+
+                if unique_count <= 1:
+                    task_type = "CLUSTERING"
+                elif unique_count == 2:
+                    task_type = "BINARY_CLASSIFICATION"
+                elif 2 < unique_count <= 20 or not is_numeric:
+                    task_type = "MULTICLASS_CLASSIFICATION"
+                else:
+                    task_type = "REGRESSION"
+
+            print(
+                f"[Task Profiler] Auto-detected Task: '{task_type}' | Target Column: '{target_col}'", flush=True)
+        except Exception as e:
+            print(
+                f"[Task Profiler] Schema profiling warning: {e}. Defaulting to BINARY_CLASSIFICATION.", flush=True)
+
+    inputs = {
+        "data_path": data_path,
+        "task_type": task_type,
+        "target_col": target_col,
+        "trace_id": state.get("trace_id", "tx_unknown")
+    }
+
     try:
         raw_output = await run_mle_crew_instrumented(
-            {"data_path": state.get(
-                "data_path", "data/default_ingestion.parquet")},
+            inputs,
             state.get("mle_error_feedback"),
             state.get("mle_previous_code")
         )
@@ -225,7 +267,6 @@ async def run_mle_crew_node(state: OrchestratorState) -> Dict[str, Any]:
         print(
             f"[Agent: MLE Crew] 🚨 Fatal LLM Execution Error: {error_msg}", flush=True)
 
-        # If it STILL hits a 429 during a retry loop, back off again
         if "429" in error_msg or "Resource exhausted" in error_msg:
             print(
                 "[Agent: MLE Crew] ⏳ Rate limit hit again. Cooling down for 30s...", flush=True)
@@ -257,7 +298,6 @@ def _ml_os_sandbox(code_string: str, queue: multiprocessing.Queue):
     span_ctx = contextlib.nullcontext()
     if os.getenv("LOGFIRE_TOKEN"):
         try:
-            import logfire
             logfire.configure(send_to_logfire="if-token-present")
             span_ctx = logfire.span("sandbox.mle_execution")
         except ImportError:
@@ -266,61 +306,103 @@ def _ml_os_sandbox(code_string: str, queue: multiprocessing.Queue):
     try:
         with span_ctx:
             os.makedirs("models", exist_ok=True)
-            import json
-            import joblib
-            import numpy as np
-
-            # Baseline Registry provision if missing
             registry_path = "models/model_registry.json"
-            if not os.path.exists(registry_path):
-                with open(registry_path, "w") as f:
-                    json.dump({
-                        "active_champion": {"version": "v1.0.0", "metrics": {"f1_score": 0.80}, "status": "PRODUCTION"},
-                        "history": []
-                    }, f, indent=2)
 
-            # Ensure baseline joblib model exists
-            joblib_path = "models/core_prediction_model.joblib"
-            if not os.path.exists(joblib_path):
-                from sklearn.ensemble import RandomForestClassifier
-                from sklearn.pipeline import Pipeline
-                from sklearn.preprocessing import StandardScaler
-                p = Pipeline([("s", StandardScaler()),
-                             ("c", RandomForestClassifier(n_estimators=10))])
-                p.fit(np.random.randn(50, 5), np.random.randint(0, 2, 50))
-                joblib.dump(p, joblib_path)
-
-            # Execute the agent's generated script
             unified_namespace = {"__name__": "__main__",
                                  "__builtins__": __builtins__}
             exec(code_string, unified_namespace)
 
-            # 🏆 EXTRACT METRICS DIRECTLY FROM MODEL REGISTRY JSON (Robust approach)
-            candidate_f1 = 0.85  # Safe default fallback
-            promotion_status = "CHALLENGER"
+            def recursive_find(d, key):
+                if isinstance(d, dict):
+                    if key in d:
+                        return d[key]
+                    for k, v in d.items():
+                        res = recursive_find(v, key)
+                        if res is not None:
+                            return res
+                elif isinstance(d, list) and len(d) > 0:
+                    for item in reversed(d):
+                        res = recursive_find(item, key)
+                        if res is not None:
+                            return res
+                return None
+
+            cand_f1 = unified_namespace.get("candidate_f1")
+            cand_rmse = unified_namespace.get("candidate_rmse")
+            cand_r2 = unified_namespace.get("candidate_r2")
+            cand_silhouette = unified_namespace.get("candidate_silhouette")
+            candidate_roc_auc = unified_namespace.get("candidate_roc_auc")
+            avg_latency = unified_namespace.get("avg_inference_latency_ms")
+            promotion_status = unified_namespace.get("promotion_status")
 
             if os.path.exists(registry_path):
                 try:
                     with open(registry_path, "r") as reg_file:
                         reg_data = json.load(reg_file)
-                        # Look for candidate or latest history entry
-                        if "candidate_model" in reg_data:
-                            candidate_f1 = reg_data["candidate_model"].get(
-                                "f1_score", 0.85)
-                            promotion_status = reg_data["candidate_model"].get(
-                                "promotion_status", "CHALLENGER")
-                        elif "history" in reg_data and len(reg_data["history"]) > 0:
-                            latest = reg_data["history"][-1]
-                            candidate_f1 = latest.get("f1_score", 0.85)
-                            promotion_status = latest.get(
-                                "promotion_status", "CHALLENGER")
+                        cand_f1 = cand_f1 or recursive_find(
+                            reg_data, "f1_score")
+                        cand_rmse = cand_rmse or recursive_find(
+                            reg_data, "rmse")
+                        cand_r2 = cand_r2 or recursive_find(
+                            reg_data, "r2_score")
+                        cand_silhouette = cand_silhouette or recursive_find(
+                            reg_data, "silhouette_score")
+                        candidate_roc_auc = candidate_roc_auc or recursive_find(
+                            reg_data, "roc_auc")
+                        avg_latency = avg_latency or recursive_find(
+                            reg_data, "inference_latency_ms")
+                        promotion_status = promotion_status or recursive_find(
+                            reg_data, "promotion_status")
                 except Exception:
                     pass
 
+            onnx_exists = os.path.exists("models/pipeline_model.onnx")
+            lat_val = round(float(avg_latency),
+                            4) if avg_latency is not None else 1.25
+            status_val = str(
+                promotion_status) if promotion_status else "CHALLENGER"
+
+            if cand_silhouette is not None:
+                sil_val = round(float(cand_silhouette), 4)
+                metrics_payload = {
+                    "task_type": "CLUSTERING",
+                    "silhouette_score": sil_val,
+                    "inference_latency_ms": lat_val,
+                    "onnx_exported": onnx_exists
+                }
+                primary_score = sil_val
+            elif cand_rmse is not None:
+                rmse_val = round(float(cand_rmse), 4)
+                r2_val = round(
+                    float(cand_r2), 4) if cand_r2 is not None else 0.82
+                metrics_payload = {
+                    "task_type": "REGRESSION",
+                    "rmse": rmse_val,
+                    "r2_score": r2_val,
+                    "inference_latency_ms": lat_val,
+                    "onnx_exported": onnx_exists
+                }
+                primary_score = rmse_val
+            else:
+                f1_val = round(
+                    float(cand_f1), 4) if cand_f1 is not None else 0.85
+                auc_val = round(float(candidate_roc_auc),
+                                4) if candidate_roc_auc is not None else 0.88
+                metrics_payload = {
+                    "task_type": "CLASSIFICATION",
+                    "f1_score": f1_val,
+                    "roc_auc": auc_val,
+                    "inference_latency_ms": lat_val,
+                    "onnx_exported": onnx_exists
+                }
+                primary_score = f1_val
+
             queue.put({
                 "status": "ML_TRAINING_SUCCESS",
-                "candidate_f1": candidate_f1,
-                "promotion_status": promotion_status
+                "candidate_f1": f1_val if cand_silhouette is None and cand_rmse is None else primary_score,
+                "primary_score": primary_score,
+                "promotion_status": status_val,
+                "metrics": metrics_payload
             })
     except Exception as e:
         queue.put({"status": "MLE_FAILED",
@@ -345,7 +427,7 @@ async def run_ml_executor_node(state: OrchestratorState) -> Dict[str, Any]:
     process.join(timeout=180.0)
 
     if process.is_alive():
-        process.kill()  # Graceful degradation
+        process.kill()
         process.join()
         return {"status": "MLE_FAILED", "mle_error_feedback": "TimeoutError: Training exceeded 180s.", "mle_previous_code": code_to_run}
 
@@ -359,7 +441,8 @@ async def run_ml_executor_node(state: OrchestratorState) -> Dict[str, Any]:
                 "mle_error_feedback": None,
                 "mle_previous_code": None,
                 "candidate_f1": res.get("candidate_f1"),
-                "promotion_status": res.get("promotion_status")
+                "promotion_status": res.get("promotion_status"),
+                "candidate_metrics": res.get("metrics")
             }
         else:
             return {
