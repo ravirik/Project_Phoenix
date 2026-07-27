@@ -4,6 +4,7 @@ from psycopg_pool import AsyncConnectionPool
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from src.domain.models import OrchestratorState
 from src.agents.graph import build_phoenix_runtime
+from src.observability_bus import start_run, finish_run
 
 # Global runtime singletons
 _runtime_engine = None
@@ -46,9 +47,16 @@ async def trigger_agentic_pipeline(payload: dict):
         data_path=payload.get("data_path", "data/default_ingestion.parquet")
     )
 
+    await start_run(payload["trace_id"], payload.get("pipeline_id", ""))
+
+    final_status = "UNKNOWN"
     with logfire.span("phoenix.pipeline_execution", trace_id=payload['trace_id']):
         async for event in _runtime_engine.astream(
             initial_state,
             config={"configurable": {"thread_id": payload['trace_id']}}
         ):
-            pass
+            for node_output in event.values():
+                if isinstance(node_output, dict) and "status" in node_output:
+                    final_status = node_output["status"]
+
+    await finish_run(payload["trace_id"], final_status)
