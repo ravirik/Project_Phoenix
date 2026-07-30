@@ -1,0 +1,70 @@
+name: Deploy Project Phoenix to GKE
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  PROJECT_ID: project-ef63aca8-8e0f-435e-9fd
+  REGION: us-east1
+  CLUSTER: phoenix-cluster
+  REPO_REGION: us-east1
+  REPOSITORY: phoenix-repo
+  IMAGE: ai-worker
+
+jobs:
+  deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+    
+    # CRITICAL: These permissions are required for Workload Identity Federation (Keyless Auth)
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Authenticate to Google Cloud via WIF
+      id: auth
+      uses: google-github-actions/auth@v2
+      with:
+        workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+        service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+    - name: Set up Google Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+
+    - name: Configure Docker Auth for Artifact Registry
+      run: |-
+        gcloud auth configure-docker ${{ env.REPO_REGION }}-docker.pkg.dev --quiet
+
+    - name: Build and Push Docker Image
+      run: |-
+        # We use the unique Git commit SHA to tag the image instead of 'latest' or 'v3'
+        IMAGE_PATH="${{ env.REPO_REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE }}:${{ github.sha }}"
+        
+        docker build -t $IMAGE_PATH -f Dockerfile .
+        docker push $IMAGE_PATH
+
+    - name: Get GKE Cluster Credentials
+      uses: google-github-actions/get-gke-credentials@v2
+      with:
+        cluster_name: ${{ env.CLUSTER }}
+        location: ${{ env.REGION }}
+
+    - name: Deploy to Kubernetes
+      run: |-
+        IMAGE_PATH="${{ env.REPO_REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE }}:${{ github.sha }}"
+        
+        # 1. Update the AI Worker deployment with the new image
+        kubectl set image deployment/phoenix-ai-worker ai-worker=$IMAGE_PATH
+        
+        # 2. Update the Streamlit UI deployment with the new image
+        kubectl set image deployment/phoenix-streamlit streamlit=$IMAGE_PATH
+        
+        # 3. Wait for the rollouts to complete successfully
+        kubectl rollout status deployment/phoenix-ai-worker
+        kubectl rollout status deployment/phoenix-streamlit
