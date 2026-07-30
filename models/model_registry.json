@@ -1,0 +1,769 @@
+{
+  "active_champion": {
+    "version": "v51_1785423199",
+    "task_type": "CLASSIFICATION",
+    "metrics": {
+      "pr_auc": 0.3903,
+      "f1_score": 0.6,
+      "roc_auc": 0.7565,
+      "fairness_score": 1.0,
+      "inference_latency_ms": 0.0911,
+      "onnx_exported": true,
+      "primary_score": 0.3903
+    },
+    "status": "PRODUCTION",
+    "timestamp": 1785423199.8777754
+  },
+  "history": [
+    {
+      "version": "v45_1785341944",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0997,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785341944.1352293
+    },
+    {
+      "version": "v46_1785342023",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0766,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785342023.7114563
+    },
+    {
+      "version": "v47_1785342103",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.1103,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785342103.9305696
+    },
+    {
+      "version": "v48_1785342180",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0881,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785342180.772298
+    },
+    {
+      "version": "v49_1785342281",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.1638,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785342281.8848643
+    },
+    {
+      "version": "v50_1785342356",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0738,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785342356.0387957
+    },
+    {
+      "version": "v51_1785342455",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0791,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785342455.9104373
+    },
+    {
+      "version": "v51_1785342542",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.2091,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785342542.4485972
+    },
+    {
+      "version": "v51_1785342634",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.1106,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785342634.7016244
+    },
+    {
+      "version": "v51_1785342727",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0753,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785342727.240544
+    },
+    {
+      "version": "v51_1785342826",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0775,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785342826.1911428
+    },
+    {
+      "version": "v51_1785342911",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0914,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785342911.29519
+    },
+    {
+      "version": "v51_1785342995",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0769,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785342995.8216176
+    },
+    {
+      "version": "v51_1785343086",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0802,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785343086.8088112
+    },
+    {
+      "version": "v51_1785343177",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0796,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785343177.577789
+    },
+    {
+      "version": "v51_1785343254",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0751,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785343254.2123544
+    },
+    {
+      "version": "v51_1785343336",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.1093,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785343336.6037142
+    },
+    {
+      "version": "v51_1785343414",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0775,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785343414.2786753
+    },
+    {
+      "version": "v51_1785343487",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0792,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785343487.208722
+    },
+    {
+      "version": "v51_1785343574",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0794,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785343574.4068785
+    },
+    {
+      "version": "v51_1785343691",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.1594,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785343691.5067246
+    },
+    {
+      "version": "v51_1785357111",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0759,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785357111.959936
+    },
+    {
+      "version": "v51_1785357198",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0806,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785357198.0539496
+    },
+    {
+      "version": "v51_1785357284",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0746,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785357284.9867582
+    },
+    {
+      "version": "v51_1785357374",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0791,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785357374.6657634
+    },
+    {
+      "version": "v51_1785357470",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.1069,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785357470.8507419
+    },
+    {
+      "version": "v51_1785357547",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.085,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785357547.582558
+    },
+    {
+      "version": "v51_1785357620",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0832,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785357620.1190271
+    },
+    {
+      "version": "v51_1785357687",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0843,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785357687.7304819
+    },
+    {
+      "version": "v51_1785357755",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0775,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785357755.1522782
+    },
+    {
+      "version": "v51_1785358744",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0861,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785358744.8777988
+    },
+    {
+      "version": "v51_1785358820",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0856,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785358820.7999792
+    },
+    {
+      "version": "v51_1785358893",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0781,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785358893.9231253
+    },
+    {
+      "version": "v51_1785358970",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0747,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785358970.259542
+    },
+    {
+      "version": "v51_1785359047",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.083,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785359047.0518801
+    },
+    {
+      "version": "v51_1785359137",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0813,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785359137.721931
+    },
+    {
+      "version": "v51_1785359208",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.1706,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785359208.072917
+    },
+    {
+      "version": "v51_1785359287",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0923,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785359287.6881998
+    },
+    {
+      "version": "v51_1785359375",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.1467,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785359375.9121356
+    },
+    {
+      "version": "v51_1785359465",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.1154,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785359465.071296
+    },
+    {
+      "version": "v51_1785359545",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.088,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785359545.4035869
+    },
+    {
+      "version": "v51_1785359620",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.1589,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785359620.4703505
+    },
+    {
+      "version": "v51_1785359702",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0854,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785359702.195746
+    },
+    {
+      "version": "v51_1785359778",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0768,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785359778.2868817
+    },
+    {
+      "version": "v51_1785359869",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0961,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785359869.243589
+    },
+    {
+      "version": "v51_1785359945",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.1347,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785359945.390969
+    },
+    {
+      "version": "v51_1785360032",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0979,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785360032.9739215
+    },
+    {
+      "version": "v51_1785360114",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1657,
+        "f1_score": 0.8104,
+        "roc_auc": 0.6574,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.1079,
+        "onnx_exported": true,
+        "primary_score": 0.1657
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785360114.6493542
+    },
+    {
+      "version": "v51_1785422443",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.1274,
+        "f1_score": 0.0526,
+        "roc_auc": 0.566,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0972,
+        "onnx_exported": true,
+        "primary_score": 0.1274
+      },
+      "status": "CHALLENGER (Failed Gates or Score)",
+      "timestamp": 1785422443.91973
+    },
+    {
+      "version": "v51_1785423199",
+      "task_type": "CLASSIFICATION",
+      "metrics": {
+        "pr_auc": 0.3903,
+        "f1_score": 0.6,
+        "roc_auc": 0.7565,
+        "fairness_score": 1.0,
+        "inference_latency_ms": 0.0911,
+        "onnx_exported": true,
+        "primary_score": 0.3903
+      },
+      "status": "PRODUCTION",
+      "timestamp": 1785423199.8777754
+    }
+  ]
+}

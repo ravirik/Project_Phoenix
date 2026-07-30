@@ -1,5 +1,14 @@
+<<<<<<< HEAD
+y/
+data/*.parquet
+google-cloud-sdk/
+
+# ==============================================================================
+# LOCAL ENVIRONMENT & SECRETS
+=======
 # ==============================================================================
 # GLOBAL SECRETS & GCP AUTH (CRITICAL)
+>>>>>>> origin/main
 # ==============================================================================
 .env
 .env.*
@@ -8,6 +17,42 @@
 adc.json
 application_default_credentials.json
 *credentials*.json
+<<<<<<< HEAD
+
+# ==============================================================================
+# DATASETS & GENERATED ML MODEL ARTIFACTS
+# ==============================================================================
+data/*.parquet
+data/*.csv
+!data/.gitkeep
+models/*.joblib
+models/*.onnx
+models/*.pt
+models/*.pth
+models/*.bin
+!models/.gitkeep
+
+# ==============================================================================
+# PYTHON CACHE & TESTING
+# ==============================================================================
+__pycache__/
+*.py[codz]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+
+# ==============================================================================
+# TEMP FILES & LOGS
+# ==============================================================================
+*.log
+tempCodeRunnerFile.py
+=======
 *service_account*.json
 google-cloud-sdk/
 
@@ -38,3 +83,4 @@ __pycache__/
 .idea/
 .DS_Store
 *.log
+>>>>>>> origin/main
