@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: phoenix-streamlit
+  labels:
+    app: phoenix-streamlit
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: phoenix-streamlit
+  template:
+    metadata:
+      labels:
+        app: phoenix-streamlit
+      annotations:
+        gke-gcsfuse/volumes: "true"  # CRITICAL: Triggers GCS sidecar
+    spec:
+      serviceAccountName: phoenix-ai-worker-ksa  # CRITICAL: IAM permission
+      containers:
+      - name: streamlit
+        image: us-east1-docker.pkg.dev/project-ef63aca8-8e0f-435e-9fd/phoenix-repo/ai-worker:v3
+        command: ["streamlit", "run", "dashboard/app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+        ports:
+        - containerPort: 8501
+        envFrom:
+        - secretRef:
+            name: phoenix-secrets
+        volumeMounts:
+        - name: gcs-shared-volume
+          mountPath: /app/data
+      volumes:
+      - name: gcs-shared-volume
+        persistentVolumeClaim:
+          claimName: gcs-fuse-shared-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: streamlit-service
+spec:
+  selector:
+    app: phoenix-streamlit
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8501
+  type: LoadBalancer

@@ -1,0 +1,9 @@
+spec:
+  template:
+    spec:
+      containers:
+      - name: streamlit
+        volumeMounts:
+        - name: gcs-shared-volume
+          mountPath: /app/models
+          subPath: models

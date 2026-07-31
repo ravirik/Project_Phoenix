@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: phoenix-ai-worker
+  labels:
+    app: phoenix-ai-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: phoenix-ai-worker
+  template:
+    metadata:
+      labels:
+        app: phoenix-ai-worker
+      annotations:
+        gke-gcsfuse/volumes: "true"  # CRITICAL: Triggers sidecar injection
+    spec:
+      serviceAccountName: phoenix-ai-worker-ksa  # CRITICAL: GCS Auth
+      containers:
+      - name: ai-worker
+        image: us-east1-docker.pkg.dev/project-ef63aca8-8e0f-435e-9fd/phoenix-repo/ai-worker:0deb8583dc59f8b25121454d11fce19a84482a52
+        imagePullPolicy: Always
+        envFrom:
+        - secretRef:
+            name: phoenix-secrets
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+          limits:
+            cpu: "2"
+            memory: "4Gi"
+        volumeMounts:
+        - name: gcs-shared-volume
+          mountPath: /app/data
+      volumes:
+      - name: gcs-shared-volume
+        persistentVolumeClaim:
+          claimName: gcs-fuse-shared-pvc
