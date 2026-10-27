@@ -1,4 +1,4 @@
-from typing import TypedDict, Optional, Dict, Any
+from typing import TypedDict, Optional, Dict, Any, List
 from pydantic import BaseModel
 
 
@@ -35,6 +35,8 @@ class OrchestratorState(TypedDict, total=False):
     candidate_latency_ms: Optional[float]
     champion_f1: Optional[float]
     promotion_status: Optional[str]
+    candidate_task_type: Optional[str]
+    gate_failures: Optional[List[str]]
 
     # --- Revalidation Loop Guardrails ---
     de_error_feedback: Optional[str]

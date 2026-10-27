@@ -496,10 +496,19 @@ def _is_better(task_type: str, new_score: float, champion_score) -> bool:
     return new_score > champion_score
 
 
-def _update_model_registry(task_type: str, metrics: dict, primary_score: float,
-                           candidate_onnx_path: str, champion_onnx_path: str,
-                           registry_path: str, passed_gates: bool = True) -> dict:
-    """Deterministic Champion/Challenger bookkeeping."""
+REGISTRY_PATH = "models/model_registry.json"
+CANDIDATE_ONNX_PATH = "models/candidate_model.onnx"
+CHAMPION_ONNX_PATH = "models/pipeline_model.onnx"
+
+# Enterprise gates. A metric the sandbox can't measure fails its gate instead of
+# defaulting to a passing value.
+MAX_INFERENCE_LATENCY_MS = 5.0
+MIN_FAIRNESS_SCORE = 0.8
+FAIRNESS_ATTRIBUTE = os.getenv("PHOENIX_FAIRNESS_ATTRIBUTE", "category")
+MIN_FAIRNESS_SLICE_ROWS = 30
+
+
+def _load_registry(registry_path: str) -> dict:
     registry = {"active_champion": None, "history": []}
     if os.path.exists(registry_path):
         try:
@@ -509,11 +518,21 @@ def _update_model_registry(task_type: str, metrics: dict, primary_score: float,
                     registry = loaded
         except Exception:
             pass
+    return registry
 
+
+def _would_promote(task_type: str, primary_score: float, passed_gates: bool, registry: dict) -> bool:
     champion = registry.get("active_champion")
-    champion_score = champion["metrics"].get(
-        "primary_score") if champion else None
-    won = _is_better(task_type, primary_score, champion_score) and passed_gates
+    champion_score = champion["metrics"].get("primary_score") if champion else None
+    return passed_gates and _is_better(task_type, primary_score, champion_score)
+
+
+def _update_model_registry(task_type: str, metrics: dict, primary_score: float,
+                           candidate_onnx_path: str, champion_onnx_path: str,
+                           registry_path: str, passed_gates: bool = True) -> dict:
+    """Deterministic Champion/Challenger bookkeeping. Only the auditor calls this."""
+    registry = _load_registry(registry_path)
+    won = _would_promote(task_type, primary_score, passed_gates, registry)
 
     entry = {
         "version": f"v{len(registry['history']) + 1}_{int(time.time())}",
@@ -524,9 +543,8 @@ def _update_model_registry(task_type: str, metrics: dict, primary_score: float,
     }
 
     if won:
-        if os.path.exists(candidate_onnx_path):
-            with open(candidate_onnx_path, "rb") as src, open(champion_onnx_path, "wb") as dst:
-                dst.write(src.read())
+        with open(candidate_onnx_path, "rb") as src, open(champion_onnx_path, "wb") as dst:
+            dst.write(src.read())
         registry["active_champion"] = entry
 
     registry["history"].append(entry)
@@ -538,6 +556,54 @@ def _update_model_registry(task_type: str, metrics: dict, primary_score: float,
     os.replace(tmp_path, registry_path)
 
     return registry
+
+
+def compute_fairness(X_val, y_val, y_pred, attribute: str = FAIRNESS_ATTRIBUTE,
+                     min_rows: int = MIN_FAIRNESS_SLICE_ROWS):
+    """Worst weighted F1 across slices of the protected attribute, or None when it can't be measured.
+
+    Needs at least two slices of min_rows each; one-row slices (e.g. an ID column) made the
+    score swing between 0.0 and 1.0 on a single prediction.
+    """
+    from sklearn.metrics import f1_score
+
+    if X_val is None or y_val is None or y_pred is None:
+        return None
+    if not isinstance(X_val, pd.DataFrame) or attribute not in X_val.columns:
+        return None
+
+    groups = X_val[attribute].to_numpy()
+    y_true = np.asarray(y_val)
+    y_hat = np.asarray(y_pred)
+    if not (len(groups) == len(y_true) == len(y_hat)):
+        return None
+
+    scores = []
+    for value in pd.unique(groups):
+        mask = groups == value
+        if mask.sum() >= min_rows:
+            scores.append(f1_score(y_true[mask], y_hat[mask], average="weighted", zero_division=0))
+    return float(min(scores)) if len(scores) >= 2 else None
+
+
+def evaluate_gates(task_type: str, metrics: dict) -> list:
+    """Returns the reasons a candidate fails, empty when it passes every gate."""
+    failures = []
+    latency = metrics.get("inference_latency_ms")
+    if latency is None:
+        failures.append("inference latency was not measured")
+    elif latency >= MAX_INFERENCE_LATENCY_MS:
+        failures.append(f"inference latency {latency} ms is not under {MAX_INFERENCE_LATENCY_MS} ms")
+    if not metrics.get("onnx_exported"):
+        failures.append(f"no candidate ONNX at {CANDIDATE_ONNX_PATH}")
+    if task_type == "CLASSIFICATION":
+        fairness = metrics.get("fairness_score")
+        if fairness is None:
+            failures.append(f"fairness could not be measured on '{FAIRNESS_ATTRIBUTE}' "
+                            f"(needs 2+ slices of {MIN_FAIRNESS_SLICE_ROWS}+ validation rows)")
+        elif fairness < MIN_FAIRNESS_SCORE:
+            failures.append(f"fairness {fairness} on '{FAIRNESS_ATTRIBUTE}' is under {MIN_FAIRNESS_SCORE}")
+    return failures
 
 
 def _ml_os_sandbox(code_string: str, queue: multiprocessing.Queue):
@@ -558,12 +624,9 @@ def _ml_os_sandbox(code_string: str, queue: multiprocessing.Queue):
     try:
         with span_ctx:
             os.makedirs("models", exist_ok=True)
-            registry_path = "models/model_registry.json"
-            candidate_onnx_path = "models/candidate_model.onnx"
-            champion_onnx_path = "models/pipeline_model.onnx"
 
-            if os.path.exists(candidate_onnx_path):
-                os.remove(candidate_onnx_path)
+            if os.path.exists(CANDIDATE_ONNX_PATH):
+                os.remove(CANDIDATE_ONNX_PATH)
 
             unified_namespace = {"__name__": "__main__",
                                  "__builtins__": __builtins__}
@@ -575,20 +638,15 @@ def _ml_os_sandbox(code_string: str, queue: multiprocessing.Queue):
             cand_silhouette = unified_namespace.get("candidate_silhouette")
             candidate_roc_auc = unified_namespace.get("candidate_roc_auc")
             cand_pr_auc = unified_namespace.get("candidate_pr_auc")
-            cand_fairness = unified_namespace.get("candidate_fairness")
             avg_latency = unified_namespace.get("avg_inference_latency_ms")
 
-            # Fallback if the script exported directly to pipeline_model.onnx instead of candidate_model.onnx
-            if not os.path.exists(candidate_onnx_path) and os.path.exists(champion_onnx_path):
-                import shutil
-                shutil.copy(champion_onnx_path, candidate_onnx_path)
-
-            onnx_exists = os.path.exists(candidate_onnx_path)
-            lat_val = round(float(avg_latency),
-                            4) if avg_latency is not None else 1.25
+            # No fallback to the champion's file: a candidate that didn't export fails its gate.
+            onnx_exists = os.path.exists(CANDIDATE_ONNX_PATH)
 
             def is_valid(val):
                 return val is not None and not (isinstance(val, float) and math.isnan(val))
+
+            lat_val = round(float(avg_latency), 4) if is_valid(avg_latency) else None
 
             if is_valid(cand_silhouette):
                 task_type = "CLUSTERING"
@@ -611,11 +669,16 @@ def _ml_os_sandbox(code_string: str, queue: multiprocessing.Queue):
                 task_type = "CLASSIFICATION"
                 primary_score = round(
                     float(cand_pr_auc if is_valid(cand_pr_auc) else cand_f1), 4)
+                # Measured here, not taken from the model-written script.
+                fairness = compute_fairness(unified_namespace.get("X_val"),
+                                            unified_namespace.get("y_val"),
+                                            unified_namespace.get("y_pred"))
                 metrics_payload = {
                     "pr_auc": primary_score,
                     "f1_score": round(float(cand_f1), 4) if is_valid(cand_f1) else None,
                     "roc_auc": round(float(candidate_roc_auc), 4) if is_valid(candidate_roc_auc) else None,
-                    "fairness_score": round(float(cand_fairness), 4) if is_valid(cand_fairness) else 1.0,
+                    "fairness_score": round(fairness, 4) if fairness is not None else None,
+                    "fairness_attribute": FAIRNESS_ATTRIBUTE,
                     "inference_latency_ms": lat_val,
                     "onnx_exported": onnx_exists,
                 }
@@ -624,29 +687,17 @@ def _ml_os_sandbox(code_string: str, queue: multiprocessing.Queue):
                           "error": "AssertionError: No valid metric."})
                 return
 
-            # 🛡️ THE ENTERPRISE GATES (Inside the Sandbox)
-            latency_passed = lat_val < 5.0
-            fairness_passed = metrics_payload.get("fairness_score", 1.0) >= 0.8
-            onnx_passed = onnx_exists
-
-            passed_enterprise_gates = latency_passed and fairness_passed and onnx_passed
-
-            if not passed_enterprise_gates:
-                print(
-                    f"[Auditor Sandbox] 🛑 Model REJECTED: Latency={latency_passed}, Fairness={fairness_passed}, Artifact={onnx_passed}")
-
-            registry = _update_model_registry(
-                task_type, metrics_payload, primary_score,
-                candidate_onnx_path, champion_onnx_path, registry_path,
-                passed_enterprise_gates
-            )
-            promoted = registry["active_champion"]["version"] == registry["history"][-1]["version"]
+            # The registry is not touched here: promotion happens in the auditor, after the audit.
+            gate_failures = evaluate_gates(task_type, metrics_payload)
+            if gate_failures:
+                print(f"[ML Sandbox] 🛑 Candidate fails gates: {'; '.join(gate_failures)}")
 
             queue.put({
                 "status": "ML_TRAINING_SUCCESS",
                 "candidate_f1": primary_score if task_type == "CLASSIFICATION" else None,
                 "primary_score": primary_score,
-                "promotion_status": "PRODUCTION" if promoted else "CHALLENGER",
+                "task_type": task_type,
+                "gate_failures": gate_failures,
                 "metrics": {"task_type": task_type, **metrics_payload},
             })
     except Exception as e:
@@ -663,7 +714,7 @@ async def run_ml_executor_node(state: OrchestratorState) -> Dict[str, Any]:
     trace_id = state.get("trace_id", "unknown")
     await publish_stage(trace_id, "ml_executor", "RUNNING")
     result = await _run_ml_executor_node_impl(state)
-    
+
     # 🛡️ THE FIX: Forcefully increment escalation count right before routing!
     if result.get("status") == "MLE_FAILED":
         retries = state.get("mle_retry_count", 0)
@@ -705,7 +756,10 @@ async def _run_ml_executor_node_impl(state: OrchestratorState) -> Dict[str, Any]
                 "mle_error_feedback": None,
                 "mle_previous_code": None,
                 "candidate_f1": res.get("candidate_f1"),
-                "promotion_status": res.get("promotion_status"),
+                "primary_score": res.get("primary_score"),
+                "candidate_task_type": res.get("task_type"),
+                "gate_failures": res.get("gate_failures"),
+                "promotion_status": None,
                 "metrics": res.get("metrics"),
                 "candidate_metrics": res.get("metrics")
             }
@@ -725,7 +779,7 @@ async def _run_ml_executor_node_impl(state: OrchestratorState) -> Dict[str, Any]
 
 async def run_auditor_node(state: OrchestratorState) -> Dict[str, Any]:
     """
-    Central Nervous System: Evaluates trace failures, breaks infinite loops, 
+    Central Nervous System: Evaluates trace failures, breaks infinite loops,
     runs AI compliance reviews, and validates sandbox promotions before finalizing.
     """
     trace_id = state.get("trace_id", "unknown")
@@ -738,28 +792,28 @@ async def run_auditor_node(state: OrchestratorState) -> Dict[str, Any]:
         mle_retries = state.get("mle_retry_count", 0)
         current_status = state.get("status")
 
-        # 🛡️ 1. INFINITE LOOP PROTECTION (DEAD-LETTER QUEUE)
-        if de_retries >= 3 or mle_retries >= 3:
-            dlq_reason = f"Max retries exceeded (DE: {de_retries}, MLE: {mle_retries})."
-            print(
-                f"\n[Auditor] 🚨 {dlq_reason} Routing trace {trace_id} to NATS Dead-Letter Queue (DLQ).", flush=True)
-
-            await publish_stage(trace_id, "auditor_node", "FAILED", detail="Routed to DLQ for human review.")
-            return {"status": "DLQ_ROUTED", "auditor_feedback": dlq_reason}
-
-        # 🛡️ 2. HYBRID MODEL VALIDATION & GOVERNANCE
+        # 🛡️ 1. HYBRID MODEL VALIDATION & GOVERNANCE
+        # Checked before the retry limit: a run that trained on its last allowed attempt is
+        # audited, not dead-lettered. This is also the only place the registry changes.
         if current_status == "ML_EXECUTION_COMPLETED":
             # 🌟 FIX: Pull correctly from candidate_metrics where the sandbox put it
             ml_metrics = state.get(
                 "candidate_metrics") or state.get("metrics") or {}
             psi_score = state.get("metrics", {}).get("psi_score", 0.0)
+            task_type = state.get("candidate_task_type") or ml_metrics.get("task_type")
+            primary_score = state.get("primary_score", state.get("candidate_f1"))
+            gate_failures = state.get("gate_failures")
+            if gate_failures is None:
+                gate_failures = evaluate_gates(task_type, ml_metrics)
+            passed_gates = not gate_failures
 
-            promotion_status = state.get("promotion_status")
+            will_promote = _would_promote(task_type, primary_score, passed_gates,
+                                          _load_registry(REGISTRY_PATH))
 
             # --- A. AI Qualitative Review (The New Crew) ---
             # Free-tier budget: only a promotion gets an AI release note. A challenger was
             # already rejected by the deterministic gates, so its note is written from the metrics.
-            if promotion_status == "PRODUCTION":
+            if will_promote:
                 print(
                     "\n[Auditor] 🧠 Waking up AI Compliance Board to review sandbox results...", flush=True)
                 from src.agents.crews import get_auditor_crew
@@ -776,12 +830,12 @@ async def run_auditor_node(state: OrchestratorState) -> Dict[str, Any]:
                     notes_str = release_notes.raw if hasattr(
                         release_notes, 'raw') else str(release_notes)
                 except Exception as e:
-                    # A provider error (e.g. a spent quota) must not crash the run after the
-                    # registry has already been written.
+                    # A provider error (e.g. a spent quota) must not crash the run.
                     notes_str = f"AI release note unavailable ({type(e).__name__}: {str(e)[:200]})."
             else:
                 metrics_str = ", ".join(f"{k}={v}" for k, v in ml_metrics.items())
-                notes_str = (f"Candidate failed the deterministic gates; no AI review requested. "
+                reason = "; ".join(gate_failures) if gate_failures else "did not beat the champion"
+                notes_str = (f"Not promoted ({reason}); no AI review requested. "
                              f"PSI {psi_score}. Metrics: {metrics_str}.")
 
             print("\n================= 📝 MODEL RELEASE NOTES =================")
@@ -791,12 +845,15 @@ async def run_auditor_node(state: OrchestratorState) -> Dict[str, Any]:
 
             # --- B. Deterministic Gate Enforcement ---
             print(
-                "[Auditor] 🧱 AI Review complete. Enforcing hard mathematical gates...", flush=True)
-            candidate_f1 = state.get("primary_score", state.get(
-                "candidate_f1"))  # Fallback for compatibility
+                "[Auditor] 🧱 Recording the candidate against the hard mathematical gates...", flush=True)
+            registry = _update_model_registry(
+                task_type, ml_metrics, primary_score,
+                CANDIDATE_ONNX_PATH, CHAMPION_ONNX_PATH, REGISTRY_PATH, passed_gates)
+            promoted = registry["active_champion"] is not None and \
+                registry["active_champion"]["version"] == registry["history"][-1]["version"]
 
-            if promotion_status == "PRODUCTION":
-                msg = f"Deterministic Gate Approved: Math checks passed. Promoted to PRODUCTION with score {candidate_f1}."
+            if promoted:
+                msg = f"Deterministic Gate Approved: Math checks passed. Promoted to PRODUCTION with score {primary_score}."
                 print(f"✅ {msg}", flush=True)
 
                 combined_detail = f"**🤖 AI Compliance Board Report:**\n\n{notes_str}\n\n---\n\n✅ **{msg}**"
@@ -805,11 +862,13 @@ async def run_auditor_node(state: OrchestratorState) -> Dict[str, Any]:
                 # 🌟 FIX: Return metrics along with status so they persist in the final state
                 return {
                     "status": "AUDIT_PASSED_PROMOTED",
-                    "primary_score": candidate_f1,
+                    "promotion_status": "PRODUCTION",
+                    "primary_score": primary_score,
                     "candidate_metrics": ml_metrics
                 }
             else:
-                msg = f"Deterministic Gate Rejected: Math checks failed. Logged as CHALLENGER with score {candidate_f1}."
+                reason = "; ".join(gate_failures) if gate_failures else "did not beat the champion"
+                msg = f"Not promoted ({reason}). Logged as CHALLENGER with score {primary_score}."
                 print(f"⚠️ {msg}", flush=True)
 
                 combined_detail = f"**🤖 AI Compliance Board Report:**\n\n{notes_str}\n\n---\n\n⚠️ **{msg}**"
@@ -818,9 +877,19 @@ async def run_auditor_node(state: OrchestratorState) -> Dict[str, Any]:
                 # 🌟 FIX: Return metrics along with status so they persist in the final state
                 return {
                     "status": "AUDIT_PASSED_CHALLENGER",
-                    "primary_score": candidate_f1,
+                    "promotion_status": "CHALLENGER",
+                    "primary_score": primary_score,
                     "candidate_metrics": ml_metrics
                 }
+
+        # 🛡️ 2. INFINITE LOOP PROTECTION (DEAD-LETTER QUEUE)
+        if de_retries >= 3 or mle_retries >= 3:
+            dlq_reason = f"Max retries exceeded (DE: {de_retries}, MLE: {mle_retries})."
+            print(
+                f"\n[Auditor] 🚨 {dlq_reason} Routing trace {trace_id} to NATS Dead-Letter Queue (DLQ).", flush=True)
+
+            await publish_stage(trace_id, "auditor_node", "FAILED", detail="Routed to DLQ for human review.")
+            return {"status": "DLQ_ROUTED", "auditor_feedback": dlq_reason}
 
         # 🛡️ 3. DATA ENGINEERING VALIDATION
         if current_status == "SUCCESS":  # Meaning DE sandbox passed

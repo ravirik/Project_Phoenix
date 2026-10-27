@@ -51,28 +51,36 @@ class TestCrewShapes:
         assert "gemini" in type(crew.agents[0].llm).__name__.lower()
 
 
-def _audit(state, monkeypatch, crew_factory):
+def _audit(state, monkeypatch, tmp_path, crew_factory):
     async def no_publish(*args, **kwargs):
         return None
 
+    monkeypatch.setattr(nodes, "REGISTRY_PATH", str(tmp_path / "model_registry.json"))
+    monkeypatch.setattr(nodes, "CANDIDATE_ONNX_PATH", str(tmp_path / "candidate_model.onnx"))
+    monkeypatch.setattr(nodes, "CHAMPION_ONNX_PATH", str(tmp_path / "pipeline_model.onnx"))
+    (tmp_path / "candidate_model.onnx").write_bytes(b"candidate")
     monkeypatch.setattr(nodes, "publish_stage", no_publish)
     monkeypatch.setattr(crews, "get_auditor_crew", crew_factory)
     return asyncio.run(nodes.run_auditor_node(state))
 
 
+PASSING = {"task_type": "CLASSIFICATION", "pr_auc": 0.4, "fairness_score": 0.9,
+           "inference_latency_ms": 0.1, "onnx_exported": True}
 AUDITED = {"trace_id": "tx", "status": "ML_EXECUTION_COMPLETED", "de_retry_count": 1,
-           "mle_retry_count": 1, "metrics": {"pr_auc": 0.4}, "primary_score": 0.4}
+           "mle_retry_count": 1, "metrics": {"psi_score": 3.1}, "candidate_metrics": PASSING,
+           "primary_score": 0.4, "candidate_task_type": "CLASSIFICATION", "gate_failures": []}
 
 
 class TestAuditorBudget:
-    def test_challenger_makes_no_model_request(self, monkeypatch):
+    def test_challenger_makes_no_model_request(self, monkeypatch, tmp_path):
         def must_not_run(*args, **kwargs):
             raise AssertionError("auditor crew built for a rejected candidate")
 
-        result = _audit({**AUDITED, "promotion_status": "CHALLENGER"}, monkeypatch, must_not_run)
+        failing = {**AUDITED, "gate_failures": ["fairness not measured"]}
+        result = _audit(failing, monkeypatch, tmp_path, must_not_run)
         assert result["status"] == "AUDIT_PASSED_CHALLENGER"
 
-    def test_provider_error_does_not_crash_a_promotion(self, monkeypatch):
+    def test_provider_error_does_not_crash_a_promotion(self, monkeypatch, tmp_path):
         class QuotaSpent:
             def __init__(self, *args, **kwargs):
                 pass
@@ -80,5 +88,5 @@ class TestAuditorBudget:
             async def kickoff_async(self):
                 raise RuntimeError(TestQuotaRetries.DAILY)
 
-        result = _audit({**AUDITED, "promotion_status": "PRODUCTION"}, monkeypatch, QuotaSpent)
+        result = _audit(AUDITED, monkeypatch, tmp_path, QuotaSpent)
         assert result["status"] == "AUDIT_PASSED_PROMOTED"
