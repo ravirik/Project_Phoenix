@@ -2,8 +2,7 @@ import os
 import logfire
 from crewai import Agent, Crew, Process, Task
 from src.config.llm import get_crewai_llm
-from src.agents.tools import search_historical_playbooks
-from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
+from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception
 
 
 def agent_step_callback(agent_completion):
@@ -16,30 +15,23 @@ def agent_step_callback(agent_completion):
 def create_de_crew(de_error_feedback: str = None, previous_code: str = None) -> Crew:
     llm = get_crewai_llm()
 
-    sre_agent = Agent(
-        role="Data Quality SRE",
-        goal="Diagnose pipeline telemetry anomalies and schema drift.",
-        backstory="You are a senior Data SRE. Provide concise diagnostic reports based on telemetry logs.",
-        llm=llm, max_iter=3, verbose=True
-    )
-
+    # Free-tier budget: one agent with no tools makes exactly one model request.
+    # The playbook search runs before the crew (see _run_de_crew_node_impl), so the
+    # agent doesn't spend requests on a tool-calling loop, and the separate SRE
+    # diagnosis step is gone because nothing downstream read its report.
     de_agent = Agent(
         role="Data Engineer",
         goal="Formulate an executable Python Pandas patch to fix data anomalies in-place.",
         backstory="You are a principal Data Engineer. Output ONLY valid, executable Pandas code enclosed inside triple backticks.",
-        tools=[search_historical_playbooks],
-        llm=llm, max_iter=3, verbose=True
-    )
-
-    task_diagnose = Task(
-        description="Analyze trace ID '{trace_id}'. Telemetry alerts indicate schema drift and data quality degradation. Summarize the defect.",
-        expected_output="An incident diagnostic report.",
-        agent=sre_agent
+        llm=llm, max_iter=1, verbose=True
     )
 
     patch_description = (
+        "Trace ID '{trace_id}': telemetry alerts indicate schema drift and data quality degradation.\n"
         "Formulate an in-place Python Pandas patch to clean the DataFrame 'df'.\n"
         "ACTUAL DATAFRAME COLUMNS IN DATASET: {schema_columns}\n"
+        "COLUMN DTYPES AND NULL COUNTS: {schema_profile}\n"
+        "CLOSEST HISTORICAL PLAYBOOK (reuse only if it fits these columns):\n{playbook_context}\n"
         "Requirements:\n"
         "1. Use ONLY the columns listed above in your pandas operations to avoid KeyErrors.\n"
         "2. Output ONLY the Python patch strictly inside ```python ... ``` triple backticks.\n"
@@ -65,8 +57,8 @@ def create_de_crew(de_error_feedback: str = None, previous_code: str = None) -> 
     )
 
     return Crew(
-        agents=[sre_agent, de_agent],
-        tasks=[task_diagnose, task_patch],
+        agents=[de_agent],
+        tasks=[task_patch],
         process=Process.sequential,
         step_callback=agent_step_callback,
         verbose=True
@@ -84,7 +76,7 @@ def create_mle_crew(mle_error_feedback: str = None, previous_code: str = None) -
             "to fit Scikit-Learn models tailored to the auto-detected task type, evaluate performance, "
             "export candidate models to ONNX format, and output metric variables into top-level scope."
         ),
-        llm=llm, max_iter=3, verbose=True
+        llm=llm, max_iter=1, verbose=True
     )
 
     serialize_description = (
@@ -92,7 +84,10 @@ def create_mle_crew(mle_error_feedback: str = None, previous_code: str = None) -
         "CONFIG:\n"
         "- Dataset Path: '{data_path}'\n"
         "- Task Type: '{task_type}'\n"
-        "- Target Column: '{target_col}'\n\n"
+        "- Target Column: '{target_col}'\n"
+        "- Column dtypes: {schema_profile}\n"
+        "- Text columns load as pandas StringDtype, which NumPy can't interpret. Detect them with "
+        "pd.api.types.is_numeric_dtype, never np.issubdtype or dtype == object.\n\n"
         "REQUIREMENTS:\n"
         "1. DATA LOADING & PREPROCESSING:\n"
         "   - Load Parquet dataset strictly from '{data_path}'.\n"
@@ -148,10 +143,20 @@ def is_rate_limit(exception):
     return "429" in str(exception) or "Resource exhausted" in str(exception)
 
 
+def is_daily_quota_exhausted(exception) -> bool:
+    """A per-day quota (the free tier's) won't reset for hours, so retrying only burns time."""
+    message = str(exception)
+    return "RESOURCE_EXHAUSTED" in message and "PerDay" in message
+
+
+def _worth_retrying(exception) -> bool:
+    return not is_daily_quota_exhausted(exception)
+
+
 @retry(
     wait=wait_exponential(multiplier=15, min=30, max=120),
     stop=stop_after_attempt(5),
-    retry=retry_if_exception_type(Exception),
+    retry=retry_if_exception(_worth_retrying),
     reraise=True
 )
 async def run_de_crew_instrumented(inputs: dict, err_fb: str = None, prev_code: str = None) -> str:
@@ -164,7 +169,7 @@ async def run_de_crew_instrumented(inputs: dict, err_fb: str = None, prev_code: 
 @retry(
     wait=wait_exponential(multiplier=15, min=30, max=120),
     stop=stop_after_attempt(5),
-    retry=retry_if_exception_type(Exception),
+    retry=retry_if_exception(_worth_retrying),
     reraise=True
 )
 async def run_mle_crew_instrumented(inputs: dict, err_fb: str = None, prev_code: str = None) -> str:
@@ -180,27 +185,19 @@ def get_auditor_crew(trace_id: str, psi_score: float, metrics: dict, features: l
     BEFORE the deterministic Python gate makes the final push to production.
     """
 
-    # --- AGENTS ---
-    compliance_officer = Agent(
-        role="AI Ethics & Compliance Officer",
-        goal="Ensure the newly trained candidate model does not rely on biased features and complies with enterprise fairness standards.",
+    # Free-tier budget: one agent, one task, one model request. The compliance verdict
+    # and the release note used to be two agents (four requests including hand-offs).
+    # llm= is set explicitly; without it CrewAI falls back to OpenAI.
+    release_manager = Agent(
+        role="Lead MLOps Release Manager and Compliance Reviewer",
+        goal="Check the candidate's features for bias proxies, then write the release note.",
         backstory=(
-            "You are a strict compliance officer for a major financial institution. "
-            "Your job is to review the features used by ML models to ensure they don't use "
-            "protected demographics or proxies for bias. You do not write code; you write audits."
+            "You review ML releases for a major financial institution. You flag features that act as "
+            "protected demographics or proxies for bias, and you translate drift (PSI) and model metrics "
+            "(F1, PR-AUC) into clear, executive-friendly release notes. You do not write code."
         ),
-        verbose=True,
-        allow_delegation=False
-    )
-
-    mlops_lead = Agent(
-        role="Lead MLOps Release Manager",
-        goal="Synthesize drift metrics, compliance reports, and model performance into a final Release Note.",
-        backstory=(
-            "You are the Lead MLOps Engineer bridging the gap between machines and business stakeholders. "
-            "You translate complex statistical drift (PSI, KL-Divergence) and raw model metrics (F1, PR-AUC) "
-            "into clear, executive-friendly release notes."
-        ),
+        llm=get_crewai_llm(),
+        max_iter=1,
         verbose=True,
         allow_delegation=False
     )
@@ -209,37 +206,25 @@ def get_auditor_crew(trace_id: str, psi_score: float, metrics: dict, features: l
     metrics_str = "\n".join([f"- **{k.upper()}**: {v}" for k, v in metrics.items()]
                             ) if metrics else "No sandbox metrics recorded."
 
-    # --- TASKS ---
-    compliance_task = Task(
-        description=(
-            f"Review the following feature list used by the new candidate model: {features}.\n"
-            "1. Flag any features that could be considered proxies for demographic bias (e.g., zip codes, names).\n"
-            "2. If no risky features are found, explicitly state 'COMPLIANCE PASSED: No high-risk features detected.'\n"
-            "3. Provide a brief 2-sentence justification for your decision."
-        ),
-        expected_output="A short compliance verdict passing or failing the feature list.",
-        agent=compliance_officer
-    )
-
     release_notes_task = Task(
         description=(
             f"Write a formal 'Automated Model Release Note' for trace {trace_id}.\n"
             f"Context: The system detected Data Drift with a PSI score of {psi_score}.\n"
-            # 👈 Dynamic injected metrics!
+            f"Candidate model features: {features}.\n"
             f"Sandbox Evaluation Metrics:\n{metrics_str}\n\n"
             "Include the following sections:\n"
             "1. 🚨 Incident Trigger (Why did we retrain? Mention the PSI score).\n"
-            "2. 🛡️ Compliance Verdict (Read the output from the Compliance Officer).\n"
+            "2. 🛡️ Compliance Verdict (Flag any feature that could proxy for demographic bias, e.g. zip codes "
+            "or names. If none, state 'COMPLIANCE PASSED: No high-risk features detected.' and justify in 2 sentences).\n"
             "3. 📊 Sandbox Performance (List the PR-AUC, Latency, and Fairness scores).\n"
             "4. 🤖 AI Recommendation (State whether you recommend deploying this model based on the metrics)."
         ),
         expected_output="A markdown-formatted Release Note ready for a Slack/Teams channel.",
-        agent=mlops_lead
+        agent=release_manager
     )
 
-    # --- CREW ---
     return Crew(
-        agents=[compliance_officer, mlops_lead],
-        tasks=[compliance_task, release_notes_task],
+        agents=[release_manager],
+        tasks=[release_notes_task],
         process=Process.sequential
     )

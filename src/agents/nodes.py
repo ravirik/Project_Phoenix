@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 
 from src.agents.crews import run_de_crew_instrumented, run_mle_crew_instrumented
-from src.agents.tools import upsert_playbook
+from src.agents.tools import lookup_playbook, upsert_playbook
 from src.domain.models import OrchestratorState
 from src.observability_bus import publish_stage
 
@@ -24,6 +24,11 @@ _MLE_OUTPUT_BUFFER: str = ""
 LOWER_IS_BETTER_TASKS = {"REGRESSION"}
 
 # --- DRY UTILITY: Universal Path Resolver & Code Extractor ---
+
+
+def describe_schema(df: pd.DataFrame) -> str:
+    """Compact dtype and null summary, so the model sees the data without spending a request on it."""
+    return ", ".join(f"{c}: {df[c].dtype} ({int(df[c].isnull().sum())} nulls)" for c in df.columns)
 
 
 def resolve_data_path(state: dict) -> str:
@@ -140,16 +145,24 @@ async def _run_de_crew_node_impl(state: OrchestratorState) -> Dict[str, Any]:
     prev_code = state.get("de_previous_code")
 
     actual_columns = []
+    schema_profile = "unknown"
     if os.path.exists(data_path):
         try:
             df_sample = pd.read_parquet(data_path)
             actual_columns = df_sample.columns.tolist()
+            schema_profile = describe_schema(df_sample)
         except Exception:
             pass
+
+    # One embedding call instead of an agent tool loop (each tool turn cost a model request).
+    signature = f"{err_fb or 'schema drift and data quality degradation'} | {schema_profile}"
+    playbook_context = await asyncio.to_thread(lookup_playbook, signature)
 
     inputs = {
         "trace_id": trace_id,
         "schema_columns": str(actual_columns),
+        "schema_profile": schema_profile,
+        "playbook_context": playbook_context.strip(),
         "data_path": data_path
     }
 
@@ -390,10 +403,12 @@ async def _run_mle_crew_node_impl(state: OrchestratorState) -> Dict[str, Any]:
 
     task_type = "BINARY_CLASSIFICATION"
     target_col = None
+    schema_profile = "unknown"
 
     if os.path.exists(data_path):
         try:
             df_temp = pd.read_parquet(data_path)
+            schema_profile = describe_schema(df_temp)
 
             possible_targets = [c for c in ['is_fraud', 'target', 'label', 'category',
                                             'status_code', 'price', 'transaction_amount'] if c in df_temp.columns]
@@ -432,6 +447,7 @@ async def _run_mle_crew_node_impl(state: OrchestratorState) -> Dict[str, Any]:
         "TASK_TYPE": task_type,
         "target_col": target_col,
         "TARGET_COL": target_col,
+        "schema_profile": schema_profile,
         "trace_id": state.get("trace_id", "tx_unknown")
     }
 
@@ -738,21 +754,35 @@ async def run_auditor_node(state: OrchestratorState) -> Dict[str, Any]:
                 "candidate_metrics") or state.get("metrics") or {}
             psi_score = state.get("metrics", {}).get("psi_score", 0.0)
 
+            promotion_status = state.get("promotion_status")
+
             # --- A. AI Qualitative Review (The New Crew) ---
-            print(
-                "\n[Auditor] 🧠 Waking up AI Compliance Board to review sandbox results...", flush=True)
-            from src.agents.crews import get_auditor_crew
+            # Free-tier budget: only a promotion gets an AI release note. A challenger was
+            # already rejected by the deterministic gates, so its note is written from the metrics.
+            if promotion_status == "PRODUCTION":
+                print(
+                    "\n[Auditor] 🧠 Waking up AI Compliance Board to review sandbox results...", flush=True)
+                from src.agents.crews import get_auditor_crew
 
-            extracted_features = ['account_id',
-                                  'transaction_amount', 'category']
+                extracted_features = ['account_id',
+                                      'transaction_amount', 'category']
 
-            auditor_crew = get_auditor_crew(
-                trace_id, psi_score, ml_metrics, extracted_features)
-            release_notes = await auditor_crew.kickoff_async()
+                try:
+                    auditor_crew = get_auditor_crew(
+                        trace_id, psi_score, ml_metrics, extracted_features)
+                    release_notes = await auditor_crew.kickoff_async()
 
-            # Extract the raw markdown text from the Crew output
-            notes_str = release_notes.raw if hasattr(
-                release_notes, 'raw') else str(release_notes)
+                    # Extract the raw markdown text from the Crew output
+                    notes_str = release_notes.raw if hasattr(
+                        release_notes, 'raw') else str(release_notes)
+                except Exception as e:
+                    # A provider error (e.g. a spent quota) must not crash the run after the
+                    # registry has already been written.
+                    notes_str = f"AI release note unavailable ({type(e).__name__}: {str(e)[:200]})."
+            else:
+                metrics_str = ", ".join(f"{k}={v}" for k, v in ml_metrics.items())
+                notes_str = (f"Candidate failed the deterministic gates; no AI review requested. "
+                             f"PSI {psi_score}. Metrics: {metrics_str}.")
 
             print("\n================= 📝 MODEL RELEASE NOTES =================")
             print(notes_str)
@@ -762,7 +792,6 @@ async def run_auditor_node(state: OrchestratorState) -> Dict[str, Any]:
             # --- B. Deterministic Gate Enforcement ---
             print(
                 "[Auditor] 🧱 AI Review complete. Enforcing hard mathematical gates...", flush=True)
-            promotion_status = state.get("promotion_status")
             candidate_f1 = state.get("primary_score", state.get(
                 "candidate_f1"))  # Fallback for compatibility
 
