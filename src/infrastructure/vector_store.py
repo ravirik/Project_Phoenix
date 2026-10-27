@@ -1,31 +1,24 @@
 from qdrant_client import QdrantClient
-from qdrant_client.http import models
+
+from src.infrastructure.embeddings import COLLECTION_NAME, EMBEDDING_DIM, ensure_collection
 
 
 class PlaybookVectorStore:
     def __init__(self, host: str = "127.0.0.1", port: int = 6333):
         self.client = QdrantClient(host=host, port=port)
-        self.collection_name = "remediation_playbooks"
-
-        # Updated this from 768 to 3072 to match the new model
-        self.vector_size = 3072
+        self.collection_name = COLLECTION_NAME
+        self.vector_size = EMBEDDING_DIM
 
     def initialize_schema(self):
         """Idempotent setup: ensures the collection exists without overwriting."""
-        if not self.client.collection_exists(collection_name=self.collection_name):
-            print(
-                f"[Vector Store] Initializing new collection: '{self.collection_name}'")
-            self.client.create_collection(
-                collection_name=self.collection_name,
-                vectors_config=models.VectorParams(
-                    size=self.vector_size,
-                    distance=models.Distance.COSINE
-                )
-            )
-            print("[Vector Store] Schema created successfully.")
-        else:
+        exists = self.client.collection_exists(collection_name=self.collection_name)
+        ensure_collection(self.client, self.collection_name)
+        if exists:
             print(
                 f"[Vector Store] Collection '{self.collection_name}' is ready.")
+        else:
+            print(
+                f"[Vector Store] Created '{self.collection_name}' ({self.vector_size} dims).")
 
 
 if __name__ == "__main__":

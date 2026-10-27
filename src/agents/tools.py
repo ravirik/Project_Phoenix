@@ -3,18 +3,21 @@ import uuid
 from dotenv import load_dotenv
 from crewai.tools import tool
 from pydantic import BaseModel, Field
-from google.genai import types
+import logfire
 from qdrant_client import QdrantClient
-from qdrant_client.models import VectorParams, Distance, PointStruct
+from qdrant_client.models import PointStruct
 
-from src.config.llm import get_genai_client
+from src.infrastructure.embeddings import (
+    COLLECTION_NAME,
+    EmbeddingDimensionMismatch,
+    embed_text,
+    ensure_collection,
+)
 
 load_dotenv()
 
 qdrant_url = os.getenv("QDRANT_URL", "http://phoenix-qdrant-vector:6333")
 qdrant = QdrantClient(url=qdrant_url)
-
-COLLECTION_NAME = "remediation_playbooks"
 
 
 @tool("search_historical_playbooks")
@@ -30,17 +33,8 @@ def search_historical_playbooks(incident_signature: str) -> str:
         if not qdrant.collection_exists(collection_name=COLLECTION_NAME):
             return "No historical playbooks found (Vector collection empty or not initialized yet)."
 
-        client = get_genai_client()
-
-        response = client.models.embed_content(
-            model="text-embedding-004",
-            contents=incident_signature,
-            config=types.EmbedContentConfig(
-                task_type="RETRIEVAL_QUERY",
-                output_dimensionality=768
-            )
-        )
-        query_vector = response.embeddings[0].values
+        ensure_collection(qdrant)
+        query_vector = embed_text(incident_signature, task_type="RETRIEVAL_QUERY")
 
         search_response = qdrant.query_points(
             collection_name=COLLECTION_NAME,
@@ -60,29 +54,19 @@ def search_historical_playbooks(incident_signature: str) -> str:
         - Explanation: {best_match.get('explanation', '')}
         """
 
+    except EmbeddingDimensionMismatch as e:
+        # A config error, not an empty memory: surface it instead of letting the agent guess.
+        logfire.error("Playbook retrieval misconfigured: {error}", error=str(e))
+        return f"ERROR: playbook memory is misconfigured and was not searched. {e}"
     except Exception as e:
+        logfire.error("Playbook retrieval failed: {error}", error=str(e))
         return f"No historical playbooks retrieved. Exception: {str(e)}"
 
 
 def upsert_playbook(incident_signature: str, code_patch: str) -> None:
     """Commits a verified remediation patch to long-term vector memory."""
-    if not qdrant.collection_exists(collection_name=COLLECTION_NAME):
-        qdrant.create_collection(
-            collection_name=COLLECTION_NAME,
-            vectors_config=VectorParams(size=768, distance=Distance.COSINE)
-        )
-
-    client = get_genai_client()
-
-    response = client.models.embed_content(
-        model="text-embedding-004",
-        contents=incident_signature,
-        config=types.EmbedContentConfig(
-            task_type="RETRIEVAL_DOCUMENT",
-            output_dimensionality=768
-        )
-    )
-    vector = response.embeddings[0].values
+    ensure_collection(qdrant)
+    vector = embed_text(incident_signature, task_type="RETRIEVAL_DOCUMENT")
 
     point_id = str(uuid.uuid4())
     qdrant.upsert(
