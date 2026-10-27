@@ -1,19 +1,16 @@
-import os
 import uuid
 from dotenv import load_dotenv  # <-- 1. Add this import
 
-from google import genai
-from google.genai import types
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import PointStruct
+
+from src.infrastructure.embeddings import COLLECTION_NAME, embed_text, ensure_collection
 
 # Tell Python to read existing .env file
 load_dotenv()
 
 # 1. Initialize Clients
-client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 qdrant = QdrantClient(host="127.0.0.1", port=6333)
-COLLECTION_NAME = "remediation_playbooks"
 
 # 2. Define Historical Playbooks (Our verified "Memory")
 PLAYBOOKS = [
@@ -37,21 +34,12 @@ PLAYBOOKS = [
 
 def seed_database():
     print("[Ingestion] Starting playbook vectorization...")
+    ensure_collection(qdrant)
     points = []
 
     for playbook in PLAYBOOKS:
-        # 3. Generate 768-dimensional embeddings using the modern syntax
-        response = client.models.embed_content(
-            # <-- Updated as text-embedding-004 has been retird or shut down
-            model="gemini-embedding-001",
-            contents=playbook["incident_signature"],
-            config=types.EmbedContentConfig(
-                task_type="RETRIEVAL_DOCUMENT"
-            )
-        )
-
-        # 4. Extract the raw vector array from the new response object
-        vector = response.embeddings[0].values
+        # 3. Embed with the same model and size the search tool uses
+        vector = embed_text(playbook["incident_signature"], task_type="RETRIEVAL_DOCUMENT")
 
         # 5. Construct the Qdrant Point (Vector + Metadata)
         point = PointStruct(
