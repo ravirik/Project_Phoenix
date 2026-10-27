@@ -2,6 +2,7 @@ import os
 from dotenv import load_dotenv
 from crewai import LLM
 from google import genai
+from google.genai import types
 
 load_dotenv()
 
@@ -9,10 +10,21 @@ PROJECT_ID = (os.getenv("GCP_PROJECT_ID") or os.getenv(
     "GOOGLE_CLOUD_PROJECT") or "").strip(' "\'')
 LOCATION = (os.getenv("GCP_LOCATION") or "us-central1").strip(' "\'')
 
+# gemini-2.5-flash is closed to new API keys, so default to the model llm_adapter.py uses.
 RAW_MODEL_NAME = (os.getenv("GEMINI_MODEL")
-                  or "gemini-2.5-flash").strip(' "\'')
+                  or "gemini-3.5-flash").strip(' "\'')
 CLEAN_MODEL_NAME = RAW_MODEL_NAME.replace(
     "vertex_ai/", "").replace("gemini/", "")
+
+# Thinking tokens count as output tokens against free-tier limits. "low" keeps each call
+# small; set GEMINI_THINKING_LEVEL=default to use the model's own setting.
+THINKING_LEVEL = (os.getenv("GEMINI_THINKING_LEVEL") or "low").strip(' "\'').lower()
+
+
+def _thinking_kwargs() -> dict:
+    if THINKING_LEVEL in ("", "default"):
+        return {}
+    return {"thinking_config": types.ThinkingConfig(thinking_level=THINKING_LEVEL)}
 
 
 def get_crewai_llm() -> LLM:
@@ -26,13 +38,15 @@ def get_crewai_llm() -> LLM:
             project=PROJECT_ID,
             location=LOCATION,
             temperature=0.0,
-            max_tokens=8192  # <-- Bumped to 8192
+            max_tokens=8192,  # <-- Bumped to 8192
+            **_thinking_kwargs()
         )
     else:
         return LLM(
             model=f"gemini/{CLEAN_MODEL_NAME}",
             temperature=0.0,
-            max_tokens=8192  # <-- Bumped to 8192
+            max_tokens=8192,  # <-- Bumped to 8192
+            **_thinking_kwargs()
         )
 
 

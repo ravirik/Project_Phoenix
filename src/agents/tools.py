@@ -26,6 +26,11 @@ def search_historical_playbooks(incident_signature: str) -> str:
     Searches historical incident database for verified remediation code.
     Pass failure logs or incident signature as incident_signature string.
     """
+    return lookup_playbook(incident_signature)
+
+
+def lookup_playbook(incident_signature: str) -> str:
+    """Plain-function playbook search, so callers can fetch memory without an LLM tool loop."""
     print(
         f"\n[Tool Execution] Embedding query via GenAI: '{incident_signature[:40]}...'")
 
